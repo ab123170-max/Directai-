@@ -1,0 +1,6 @@
+{
+  "name": "Cameraman AI — Smart Music Video Director",
+  "description": "Smart AI music video director with song beat analysis, AI shot planning, and CameraX-inspired production pipeline.",
+  "requestFramePermissions": ["camera", "microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
