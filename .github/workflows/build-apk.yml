@@ -56,6 +56,34 @@ jobs:
           EOF
           npx cap add android
 
+      # Capacitor creates the Android project during CI, so declare permissions
+      # here before building. Without these manifest entries Android may not
+      # expose Camera/Microphone app permissions in Settings.
+      - name: Declare Android camera and microphone permissions
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          manifest = Path("android/app/src/main/AndroidManifest.xml")
+          if not manifest.exists():
+              raise SystemExit(f"Android manifest not found: {manifest}")
+
+          xml = manifest.read_text()
+          permissions = [
+              "    <uses-permission android:name=\"android.permission.CAMERA\" />",
+              "    <uses-permission android:name=\"android.permission.RECORD_AUDIO\" />",
+          ]
+          missing = [line for line in permissions if line.split('"')[1] not in xml]
+          if missing:
+              match = re.search(r"(?m)^\s*<application\\b", xml)
+              if not match:
+                  raise SystemExit("Could not find <application> in AndroidManifest.xml")
+              xml = xml[:match.start()] + "\n".join(missing) + "\n\n" + xml[match.start():]
+              manifest.write_text(xml)
+          print(manifest.read_text())
+          PY
+
       - name: Sync web app into Android
         run: npx cap sync android
 
