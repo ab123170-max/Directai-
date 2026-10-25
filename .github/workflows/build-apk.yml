@@ -76,10 +76,10 @@ jobs:
           ]
           missing = [line for line in permissions if line.split('"')[1] not in xml]
           if missing:
-              match = re.search(r"(?m)^\s*<application\\b", xml)
-              if not match:
+              marker = "<application"
+              if marker not in xml:
                   raise SystemExit("Could not find <application> in AndroidManifest.xml")
-              xml = xml[:match.start()] + "\n".join(missing) + "\n\n" + xml[match.start():]
+              xml = xml.replace(marker, "\\n".join(missing) + "\\n\\n" + marker, 1)
               manifest.write_text(xml)
           print(manifest.read_text())
           PY
