@@ -1,8 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { AppScreen, MusicVideoProject, MusicVideoShot } from '../types';
-import {
-  Camera, Square, ArrowLeft, Check, ChevronRight, Video, RefreshCw, Volume2, VolumeX
-} from 'lucide-react';
+import { Camera, Square, ArrowLeft, Check, ChevronRight, RefreshCw, Volume2, VolumeX, ShieldCheck } from 'lucide-react';
 import { LiveGuidancePanel } from './LiveGuidancePanel';
 
 interface NativeCameraScreenProps {
@@ -11,9 +9,19 @@ interface NativeCameraScreenProps {
   onNavigate: (screen: AppScreen) => void;
 }
 
-export const NativeCameraScreen: React.FC<NativeCameraScreenProps> = ({
-  activeProject, onUpdateProject, onNavigate,
-}) => {
+function getCameraErrorMessage(error: unknown): string {
+  const name = error instanceof DOMException ? error.name : '';
+  if (name === 'NotAllowedError' || name === 'PermissionDeniedError' || name === 'SecurityError') {
+    return 'Camera permission is blocked. On your Android phone, open Settings → Apps → Cameraman AI (or the browser used to open it) → Permissions → Camera → Allow while using the app. Allow Microphone too if you want recorded audio, then return here and tap Retry camera.';
+  }
+  if (name === 'NotFoundError' || name === 'DevicesNotFoundError') return 'No available camera was found. Close other camera apps and tap Retry camera.';
+  if (name === 'NotReadableError' || name === 'TrackStartError') return 'The camera may be in use by another app. Close Camera, WhatsApp, or other apps using the camera, then retry.';
+  if (name === 'OverconstrainedError') return 'This camera does not support the requested quality. Retrying with standard camera settings.';
+  if (error instanceof Error && error.message) return error.message;
+  return 'Camera could not start. Check Android app permissions and try again.';
+}
+
+export const NativeCameraScreen: React.FC<NativeCameraScreenProps> = ({ activeProject, onUpdateProject, onNavigate }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -23,41 +31,68 @@ export const NativeCameraScreen: React.FC<NativeCameraScreenProps> = ({
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [cameraError, setCameraError] = useState('');
+  const [isOpeningCamera, setIsOpeningCamera] = useState(false);
   const [reviewClipUrl, setReviewClipUrl] = useState<string | null>(null);
   const [voiceHints, setVoiceHints] = useState(true);
   const currentShot: MusicVideoShot | undefined = activeProject.shots[currentShotIndex];
 
-  useEffect(() => {
-    let cancelled = false;
-    async function initCamera() {
+  const openCamera = useCallback(async () => {
+    setCameraError('');
+    setIsOpeningCamera(true);
+    streamRef.current?.getTracks().forEach(track => track.stop());
+    streamRef.current = null;
+    setStream(null);
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error('Camera access is unavailable in this app environment. Use the installed Cameraman AI APK or open the secure HTTPS app.');
+      }
+      let nextStream: MediaStream;
       try {
-        setCameraError('');
-        if (!navigator.mediaDevices?.getUserMedia) throw new Error('This app cannot access the camera in the current environment. Open the installed app or a secure HTTPS page.');
-        const s = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30, max: 60 } },
+        // Request video first so a denied microphone does not block camera access.
+        nextStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
           audio: true,
         });
-        if (cancelled) { s.getTracks().forEach(t => t.stop()); return; }
-        streamRef.current = s;
-        setStream(s);
-        if (videoRef.current) {
-          videoRef.current.srcObject = s;
-          await videoRef.current.play().catch(() => undefined);
+      } catch (firstError) {
+        const firstName = firstError instanceof DOMException ? firstError.name : '';
+        // If microphone permission is denied, retry with camera only.
+        if (firstName === 'NotAllowedError' || firstName === 'PermissionDeniedError') {
+          try {
+            nextStream = await navigator.mediaDevices.getUserMedia({
+              video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
+              audio: false,
+            });
+          } catch (videoError) {
+            throw videoError;
+          }
+        } else {
+          throw firstError;
         }
-      } catch (err) {
-        setCameraError(err instanceof Error ? err.message : 'Camera permission denied. Allow camera and microphone access, then retry.');
       }
+      streamRef.current = nextStream;
+      setStream(nextStream);
+      const video = videoRef.current;
+      if (video) {
+        video.srcObject = nextStream;
+        await video.play();
+      }
+    } catch (error) {
+      setCameraError(getCameraErrorMessage(error));
+    } finally {
+      setIsOpeningCamera(false);
     }
-    void initCamera();
+  }, []);
+
+  useEffect(() => {
+    void openCamera();
     return () => {
-      cancelled = true;
-      streamRef.current?.getTracks().forEach(t => t.stop());
+      streamRef.current?.getTracks().forEach(track => track.stop());
       streamRef.current = null;
       if (videoRef.current) videoRef.current.srcObject = null;
       if ('speechSynthesis' in window) window.speechSynthesis.cancel();
       if (reviewClipUrl) URL.revokeObjectURL(reviewClipUrl);
     };
-  }, []);
+  }, [openCamera]);
 
   useEffect(() => {
     if (videoRef.current && stream && videoRef.current.srcObject !== stream) {
@@ -73,8 +108,8 @@ export const NativeCameraScreen: React.FC<NativeCameraScreenProps> = ({
   }, [isRecording]);
 
   const handleStartRecording = () => {
-    if (!stream) { setCameraError('Camera is not ready yet. Tap Retry camera before recording.'); return; }
-    if (typeof MediaRecorder === 'undefined') { setCameraError('Video recording is not supported by this device browser.'); return; }
+    if (!stream) { setCameraError('Camera is not ready. Check permission and retry.'); return; }
+    if (typeof MediaRecorder === 'undefined') { setCameraError('Video recording is not supported in this app environment.'); return; }
     const mimeType = ['video/mp4;codecs=h264,aac', 'video/webm;codecs=vp8,opus', 'video/webm'].find(type => MediaRecorder.isTypeSupported(type));
     if (!mimeType) { setCameraError('No compatible video recording format is available on this device.'); return; }
     chunksRef.current = [];
@@ -82,17 +117,13 @@ export const NativeCameraScreen: React.FC<NativeCameraScreenProps> = ({
       const recorder = new MediaRecorder(stream, { mimeType });
       mediaRecorderRef.current = recorder;
       recorder.ondataavailable = event => { if (event.data?.size) chunksRef.current.push(event.data); };
-      recorder.onerror = () => setCameraError('Recording failed. Please try again.');
-      recorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || mimeType });
-        const url = URL.createObjectURL(blob);
-        setReviewClipUrl(url);
-      };
+      recorder.onerror = () => setCameraError('Recording failed. Please retry this shot.');
+      recorder.onstop = () => setReviewClipUrl(URL.createObjectURL(new Blob(chunksRef.current, { type: recorder.mimeType || mimeType })));
       recorder.start(500);
       setIsRecording(true);
       setCameraError('');
     } catch {
-      setCameraError('Unable to start recording. Try a lower resolution or restart the camera.');
+      setCameraError('Unable to start recording. Close other camera apps and try again.');
     }
   };
 
@@ -148,11 +179,11 @@ export const NativeCameraScreen: React.FC<NativeCameraScreenProps> = ({
 
         {isRecording && <div className="absolute top-32 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-600 text-white font-mono text-xs"><span className="w-2 h-2 rounded-full bg-white animate-pulse" /> REC {String(Math.floor(recordingSeconds / 60)).padStart(2, '0')}:{String(recordingSeconds % 60).padStart(2, '0')}</div>}
 
-        {cameraError && <div className="absolute inset-x-4 top-1/2 -translate-y-1/2 z-40 rounded-2xl border border-amber-300/30 bg-black/90 p-4 text-center">
-          <Camera className="w-8 h-8 mx-auto mb-2 text-amber-300" />
-          <p className="text-sm font-bold mb-1">Camera needs attention</p>
-          <p className="text-xs text-zinc-300 mb-3">{cameraError}</p>
-          <button type="button" onClick={() => { setCameraError(''); setStream(null); const s = streamRef.current; s?.getTracks().forEach(t => t.stop()); streamRef.current = null; window.location.reload(); }} className="px-4 py-2 rounded-xl bg-blue-600 text-xs font-bold"><RefreshCw className="inline w-3 h-3 mr-1" /> Retry camera</button>
+        {cameraError && <div className="absolute inset-x-4 top-1/2 -translate-y-1/2 z-40 rounded-2xl border border-amber-300/30 bg-black/95 p-4 text-center">
+          <ShieldCheck className="w-8 h-8 mx-auto mb-2 text-amber-300" />
+          <p className="text-sm font-bold mb-2">Camera permission / access issue</p>
+          <p className="text-xs leading-relaxed text-zinc-200 mb-4">{cameraError}</p>
+          <button type="button" disabled={isOpeningCamera} onClick={() => void openCamera()} className="px-4 py-3 rounded-xl bg-blue-600 text-xs font-bold disabled:opacity-50"><RefreshCw className={'inline w-3 h-3 mr-1 ' + (isOpeningCamera ? 'animate-spin' : '')} /> {isOpeningCamera ? 'Opening camera…' : 'Retry camera'}</button>
         </div>}
       </main>
 
