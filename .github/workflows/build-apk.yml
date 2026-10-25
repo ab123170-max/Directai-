@@ -79,7 +79,7 @@ jobs:
               marker = "<application"
               if marker not in xml:
                   raise SystemExit("Could not find <application> in AndroidManifest.xml")
-              xml = xml.replace(marker, "\\n".join(missing) + "\\n\\n" + marker, 1)
+              xml = xml.replace(marker, "\n".join(missing) + "\n\n" + marker, 1)
               manifest.write_text(xml)
           print(manifest.read_text())
           PY
