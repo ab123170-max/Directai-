@@ -1419,6 +1419,18 @@ private fun EditScreen(
     var trimEndSeconds by remember { mutableStateOf("10") }
     var splitAtSeconds by remember { mutableStateOf("5") }
     var editNotice by remember { mutableStateOf("These edit controls prepare edit points; final video rendering is not connected yet.") }
+    var gradingPreset by remember { mutableStateOf("Cinematic teal") }
+    var filterPreset by remember { mutableStateOf("Clean") }
+    var audioLevel by remember { mutableFloatStateOf(1f) }
+    var audioFade by remember { mutableStateOf("Fade in + out") }
+    var subtitleText by remember { mutableStateOf("") }
+    var autoEditStyle by remember { mutableStateOf("Cinematic story") }
+    var exportResolution by remember { mutableStateOf("1080p") }
+    var exportFps by remember { mutableStateOf("30 fps") }
+    var projectNote by remember { mutableStateOf("My first music video") }
+    var directorPreference by remember { mutableStateOf("Smooth cinematic movement") }
+    var performanceMode by remember { mutableStateOf("Balanced") }
+    var releaseChecks by remember { mutableStateOf(setOf<String>()) }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(15.dp)) {
         item { StudioHeader("Module 09 · Review", "Clip review & retake", "Watch the footage you recorded, check each take, and return to the same planned shot when it needs another take.") }
@@ -1490,6 +1502,123 @@ private fun EditScreen(
                         editNotice = "Transition selected: $it. This is a setting preview; rendered transitions are not wired yet."
                     }
                     Text("Selected transition: $transitionStyle", color = Cyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+        item {
+            Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF202A43)), shape = RoundedCornerShape(20.dp)) {
+                Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("MODULE 21 · COLOR GRADING", color = Cyan, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
+                    Text("Choose a color mood", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    FlowChips(listOf("Cinematic teal", "Warm sunset", "Natural", "Moody", "Bright social"), gradingPreset) { gradingPreset = it; editNotice = "Color mood selected: $it. Pixel-level grading is not rendered yet." }
+                    Text("Preview setting: $gradingPreset", color = Muted, fontSize = 11.sp)
+                }
+            }
+        }
+        item {
+            Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(20.dp)) {
+                Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("MODULE 22 · AUDIO EDITING", color = Violet, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
+                    Text("Clip audio level: ${(audioLevel * 100).toInt()}%", color = Color.White, fontWeight = FontWeight.Bold)
+                    Slider(value = audioLevel, onValueChange = { audioLevel = it }, valueRange = 0f..1f)
+                    FlowChips(listOf("No fade", "Fade in", "Fade out", "Fade in + out"), audioFade) { audioFade = it }
+                    Text("Audio settings are saved in this screen state only; they do not change the recorded file yet.", color = Muted, fontSize = 10.sp)
+                }
+            }
+        }
+        item {
+            Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF142A31)), shape = RoundedCornerShape(20.dp)) {
+                Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("MODULE 23 · AI AUTO-EDIT PLAN", color = Cyan, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
+                    FlowChips(listOf("Cinematic story", "Fast social reel", "Travel montage", "Product promo"), autoEditStyle) { autoEditStyle = it }
+                    Button(onClick = {
+                        editNotice = when {
+                            clips.isEmpty() -> "Record at least one clip before creating an edit plan."
+                            autoEditStyle == "Fast social reel" -> "Auto-edit plan: open with the strongest hook, use short detail cuts, keep the subject visible, and finish on a clear ending. No rendered montage was created."
+                            autoEditStyle == "Travel montage" -> "Auto-edit plan: wide location reveal → movement shot → environmental detail → hero view → held ending. No rendered montage was created."
+                            autoEditStyle == "Product promo" -> "Auto-edit plan: product hero → texture close-up → use/context → benefit detail → clean final frame. No rendered montage was created."
+                            else -> "Auto-edit plan: establish the scene → show action → add detail → build to the hero moment → hold the ending. No rendered montage was created."
+                        }
+                    }, modifier = Modifier.fillMaxWidth()) { Text("Create edit plan") }
+                    Text("Rule-based edit suggestions; automatic clip analysis, trimming and merging are not connected.", color = Muted, fontSize = 10.sp)
+                }
+            }
+        }
+        item {
+            Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(20.dp)) {
+                Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("MODULE 24 · SUBTITLES & CAPTIONS", color = Violet, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
+                    OutlinedTextField(value = subtitleText, onValueChange = { subtitleText = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Caption text") }, placeholder = { Text("Type your caption here") })
+                    Text("${subtitleText.length} characters · Text entry only; speech-to-text and burned-in captions are not implemented.", color = Muted, fontSize = 10.sp)
+                }
+            }
+        }
+        item {
+            Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF2B1B32)), shape = RoundedCornerShape(20.dp)) {
+                Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("MODULE 25 · EFFECTS & FILTERS", color = Violet, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
+                    FlowChips(listOf("Clean", "Film grain", "Soft glow", "Vintage", "High contrast", "Monochrome"), filterPreset) { filterPreset = it; editNotice = "Effect selected: $it. Visual filter rendering is not connected yet." }
+                    Text("Selected effect: $filterPreset", color = Cyan, fontSize = 11.sp)
+                }
+            }
+        }
+        item {
+            Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF123C35)), shape = RoundedCornerShape(20.dp)) {
+                Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("MODULE 26 · VIDEO EXPORT", color = Cyan, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
+                    FlowChips(listOf("720p", "1080p", "4K"), exportResolution) { exportResolution = it }
+                    FlowChips(listOf("24 fps", "30 fps", "60 fps"), exportFps) { exportFps = it }
+                    Button(onClick = {
+                        editNotice = if (clips.isEmpty()) "Export unavailable: record clips first." else "Export preset selected: $exportResolution · $exportFps. MP4 rendering/merging is not connected yet, so no export file was created."
+                    }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.FileDownload, null); Spacer(Modifier.width(6.dp)); Text("Prepare export settings") }
+                    Text("This button prepares settings only; it does not create a new MP4.", color = Muted, fontSize = 10.sp)
+                }
+            }
+        }
+        item {
+            Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(20.dp)) {
+                Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("MODULE 27 · PROJECT & DRAFT", color = Violet, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
+                    OutlinedTextField(value = projectNote, onValueChange = { projectNote = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Project name") }, singleLine = true)
+                    Text("Draft label: $projectNote", color = Muted, fontSize = 11.sp)
+                    Text("Currently held in app memory; persistent save/restore is not implemented.", color = Muted, fontSize = 10.sp)
+                }
+            }
+        }
+        item {
+            Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF202A43)), shape = RoundedCornerShape(20.dp)) {
+                Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("MODULE 28 · DIRECTOR PERSONALIZATION", color = Cyan, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
+                    FlowChips(listOf("Smooth cinematic movement", "Fast energetic cuts", "Natural documentary", "Portrait-focused"), directorPreference) { directorPreference = it }
+                    Text("Preferred direction: $directorPreference", color = Color.White, fontSize = 11.sp)
+                    Text("Preference is a local UI selection; adaptive learning is not implemented.", color = Muted, fontSize = 10.sp)
+                }
+            }
+        }
+        item {
+            Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(20.dp)) {
+                Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("MODULE 29 · DEVICE PERFORMANCE", color = Violet, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
+                    FlowChips(listOf("Battery saver", "Balanced", "High quality"), performanceMode) { performanceMode = it }
+                    Text(when (performanceMode) {
+                        "Battery saver" -> "Recommended: reduce background work and prefer short preview sessions. Actual encoder/analysis throttling is not yet tied to this setting."
+                        "High quality" -> "Recommended: use a well-lit scene and a device that supports the selected capture quality. Export quality controls are not wired to rendering."
+                        else -> "Recommended: keep analysis throttled and close unused apps. The setting is a preference only at this stage."
+                    }, color = Muted, fontSize = 10.sp, lineHeight = 15.sp)
+                }
+            }
+        }
+        item {
+            Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF2B1B32)), shape = RoundedCornerShape(20.dp)) {
+                Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    Text("MODULE 30 · RELEASE READINESS", color = Violet, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
+                    listOf("Camera permission and recording tested", "Front/back camera and orientation checked", "Playback and retake checked", "Trim/transition/export rendering tested", "Tested on Android 16 device").forEach { check ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(checked = check in releaseChecks, onCheckedChange = { yes -> releaseChecks = if (yes) releaseChecks + check else releaseChecks - check })
+                            Text(check, color = Color.White, fontSize = 11.sp)
+                        }
+                    }
+                    Text("${releaseChecks.size}/5 release checks marked. Checkboxes are manual tracking, not automated test results.", color = Muted, fontSize = 10.sp)
                 }
             }
         }
