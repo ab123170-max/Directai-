@@ -1,10 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { AppScreen, MusicVideoProject, MusicVideoShot } from '../types';
-import { 
-  Camera, Video, Square, Play, RotateCcw, Sparkles, Layers, Sliders, 
-  Volume2, VolumeX, Grid, Compass, ArrowLeft, Check, ChevronRight, 
-  Flashlight, ZoomIn, Eye, Film, Clapperboard, RefreshCw, CheckCircle2 
-} from 'lucide-react';
+import { Camera, Square, ArrowLeft, Check, ChevronRight, RefreshCw, Volume2, VolumeX, ShieldCheck } from 'lucide-react';
+import { LiveGuidancePanel } from './LiveGuidancePanel';
 
 interface NativeCameraScreenProps {
   activeProject: MusicVideoProject;
@@ -12,291 +9,198 @@ interface NativeCameraScreenProps {
   onNavigate: (screen: AppScreen) => void;
 }
 
-export const NativeCameraScreen: React.FC<NativeCameraScreenProps> = ({
-  activeProject,
-  onUpdateProject,
-  onNavigate,
-}) => {
+function getCameraErrorMessage(error: unknown): string {
+  const name = error instanceof DOMException ? error.name : '';
+  if (name === 'NotAllowedError' || name === 'PermissionDeniedError' || name === 'SecurityError') {
+    return 'Camera permission is blocked. On your Android phone, open Settings → Apps → Cameraman AI (or the browser used to open it) → Permissions → Camera → Allow while using the app. Allow Microphone too if you want recorded audio, then return here and tap Retry camera.';
+  }
+  if (name === 'NotFoundError' || name === 'DevicesNotFoundError') return 'No available camera was found. Close other camera apps and tap Retry camera.';
+  if (name === 'NotReadableError' || name === 'TrackStartError') return 'The camera may be in use by another app. Close Camera, WhatsApp, or other apps using the camera, then retry.';
+  if (name === 'OverconstrainedError') return 'This camera does not support the requested quality. Retrying with standard camera settings.';
+  if (error instanceof Error && error.message) return error.message;
+  return 'Camera could not start. Check Android app permissions and try again.';
+}
+
+export const NativeCameraScreen: React.FC<NativeCameraScreenProps> = ({ activeProject, onUpdateProject, onNavigate }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
-
+  const streamRef = useRef<MediaStream | null>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
-  const [currentShotIndex, setCurrentShotIndex] = useState(
-    activeProject.shots.findIndex(s => s.status === 'READY_TO_RECORD' || s.status === 'WAITING') >= 0 
-      ? activeProject.shots.findIndex(s => s.status === 'READY_TO_RECORD' || s.status === 'WAITING') 
-      : 0
-  );
+  const [currentShotIndex, setCurrentShotIndex] = useState(Math.max(0, activeProject.shots.findIndex(s => s.status === 'READY_TO_RECORD' || s.status === 'WAITING')));
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
-  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [cameraError, setCameraError] = useState('');
+  const [isOpeningCamera, setIsOpeningCamera] = useState(false);
   const [reviewClipUrl, setReviewClipUrl] = useState<string | null>(null);
+  const [voiceHints, setVoiceHints] = useState(true);
+  const currentShot: MusicVideoShot | undefined = activeProject.shots[currentShotIndex];
 
-  const currentShot: MusicVideoShot = activeProject.shots[currentShotIndex] || activeProject.shots[0];
-
-  useEffect(() => {
-    let activeStream: MediaStream | null = null;
-    async function initCamera() {
+  const openCamera = useCallback(async () => {
+    setCameraError('');
+    setIsOpeningCamera(true);
+    streamRef.current?.getTracks().forEach(track => track.stop());
+    streamRef.current = null;
+    setStream(null);
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error('Camera access is unavailable in this app environment. Use the installed Cameraman AI APK or open the secure HTTPS app.');
+      }
+      let nextStream: MediaStream;
       try {
-        setCameraError(null);
-        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-          const s = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: { ideal: 'environment' }, width: { ideal: 1080 }, height: { ideal: 1920 } },
-            audio: true,
-          });
-          activeStream = s;
-          setStream(s);
-          if (videoRef.current) {
-            videoRef.current.srcObject = s;
+        // Request video first so a denied microphone does not block camera access.
+        nextStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
+          audio: true,
+        });
+      } catch (firstError) {
+        const firstName = firstError instanceof DOMException ? firstError.name : '';
+        // If microphone permission is denied, retry with camera only.
+        if (firstName === 'NotAllowedError' || firstName === 'PermissionDeniedError') {
+          try {
+            nextStream = await navigator.mediaDevices.getUserMedia({
+              video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
+              audio: false,
+            });
+          } catch (videoError) {
+            throw videoError;
           }
         } else {
-          setCameraError('Camera API not available in browser.');
+          throw firstError;
         }
-      } catch (err: any) {
-        console.error('Camera error:', err);
-        setCameraError('Camera permission denied. Running in simulator mode.');
       }
+      streamRef.current = nextStream;
+      setStream(nextStream);
+      const video = videoRef.current;
+      if (video) {
+        video.srcObject = nextStream;
+        await video.play();
+      }
+    } catch (error) {
+      setCameraError(getCameraErrorMessage(error));
+    } finally {
+      setIsOpeningCamera(false);
     }
-    initCamera();
-    return () => {
-      if (activeStream) {
-        activeStream.getTracks().forEach(t => t.stop());
-      }
-    };
   }, []);
 
   useEffect(() => {
-    let interval: any;
-    if (isRecording) {
-      interval = setInterval(() => {
-        setRecordingSeconds(s => s + 1);
-      }, 1000);
-    } else {
-      setRecordingSeconds(0);
+    void openCamera();
+    return () => {
+      streamRef.current?.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+      if (videoRef.current) videoRef.current.srcObject = null;
+      if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+      if (reviewClipUrl) URL.revokeObjectURL(reviewClipUrl);
+    };
+  }, [openCamera]);
+
+  useEffect(() => {
+    if (videoRef.current && stream && videoRef.current.srcObject !== stream) {
+      videoRef.current.srcObject = stream;
+      void videoRef.current.play().catch(() => undefined);
     }
-    return () => clearInterval(interval);
+  }, [stream]);
+
+  useEffect(() => {
+    if (!isRecording) { setRecordingSeconds(0); return; }
+    const timer = window.setInterval(() => setRecordingSeconds(s => s + 1), 1000);
+    return () => window.clearInterval(timer);
   }, [isRecording]);
 
   const handleStartRecording = () => {
-    if (!stream) {
-      setIsRecording(true);
-      return;
-    }
+    if (!stream) { setCameraError('Camera is not ready. Check permission and retry.'); return; }
+    if (typeof MediaRecorder === 'undefined') { setCameraError('Video recording is not supported in this app environment.'); return; }
+    const mimeType = ['video/mp4;codecs=h264,aac', 'video/webm;codecs=vp8,opus', 'video/webm'].find(type => MediaRecorder.isTypeSupported(type));
+    if (!mimeType) { setCameraError('No compatible video recording format is available on this device.'); return; }
     chunksRef.current = [];
     try {
-      const recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9,opus' });
+      const recorder = new MediaRecorder(stream, { mimeType });
       mediaRecorderRef.current = recorder;
-      recorder.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) chunksRef.current.push(e.data);
-      };
-      recorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: 'video/webm' });
-        const url = URL.createObjectURL(blob);
-        setReviewClipUrl(url);
-      };
-      recorder.start();
+      recorder.ondataavailable = event => { if (event.data?.size) chunksRef.current.push(event.data); };
+      recorder.onerror = () => setCameraError('Recording failed. Please retry this shot.');
+      recorder.onstop = () => setReviewClipUrl(URL.createObjectURL(new Blob(chunksRef.current, { type: recorder.mimeType || mimeType })));
+      recorder.start(500);
       setIsRecording(true);
-    } catch (e) {
-      console.error(e);
-      setIsRecording(true);
+      setCameraError('');
+    } catch {
+      setCameraError('Unable to start recording. Close other camera apps and try again.');
     }
   };
 
   const handleStopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
-      try { mediaRecorderRef.current.stop(); } catch (e) {}
-    }
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== 'inactive') recorder.stop();
     setIsRecording(false);
-    if (!mediaRecorderRef.current) {
-      setReviewClipUrl('blob:simulator-clip');
-    }
   };
 
   const handleApproveTake = () => {
-    if (!reviewClipUrl) return;
-    const updatedShots = activeProject.shots.map((s, idx) => {
-      if (idx === currentShotIndex) {
-        return {
-          ...s,
-          status: 'COMPLETED' as const,
-          recordedClipUrl: reviewClipUrl,
-          takes: [...s.takes, reviewClipUrl],
-        };
-      }
-      if (idx === currentShotIndex + 1) {
-        return { ...s, status: 'READY_TO_RECORD' as const };
-      }
-      return s;
+    if (!reviewClipUrl || !currentShot) return;
+    const updatedShots = activeProject.shots.map((shot, index) => {
+      if (index === currentShotIndex) return { ...shot, status: 'COMPLETED' as const, recordedClipUrl: reviewClipUrl, takes: [...shot.takes, reviewClipUrl] };
+      if (index === currentShotIndex + 1) return { ...shot, status: 'READY_TO_RECORD' as const };
+      return shot;
     });
-
-    onUpdateProject({
-      ...activeProject,
-      shots: updatedShots,
-      updatedAt: Date.now(),
-    });
-
+    onUpdateProject({ ...activeProject, shots: updatedShots, updatedAt: Date.now() });
     setReviewClipUrl(null);
-    if (currentShotIndex + 1 < activeProject.shots.length) {
-      setCurrentShotIndex(currentShotIndex + 1);
-    } else {
-      onNavigate('editing');
-    }
+    if (currentShotIndex + 1 < activeProject.shots.length) setCurrentShotIndex(currentShotIndex + 1);
+    else onNavigate('editing');
+  };
+
+  const handleRetake = () => {
+    if (reviewClipUrl) URL.revokeObjectURL(reviewClipUrl);
+    setReviewClipUrl(null);
   };
 
   return (
     <div className="fixed inset-0 bg-black text-white flex flex-col overflow-hidden select-none">
-      {/* CameraX Top Bar */}
-      <div className="absolute top-0 left-0 right-0 z-30 flex items-center justify-between px-6 py-4 bg-gradient-to-b from-black/80 via-black/40 to-transparent">
-        <button
-          onClick={() => onNavigate('home')}
-          className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-black/60 border border-white/10 backdrop-blur-md text-xs font-semibold text-zinc-300"
-        >
-          <ArrowLeft className="w-4 h-4" />
-          <span>Dashboard</span>
-        </button>
+      <header className="absolute top-0 left-0 right-0 z-30 flex items-center justify-between px-3 py-3 bg-gradient-to-b from-black/80 to-transparent">
+        <button onClick={() => onNavigate('home')} className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-black/60 border border-white/10 text-xs font-semibold"><ArrowLeft className="w-4 h-4" /> Home</button>
+        <div className="px-3 py-2 rounded-full bg-blue-600/30 border border-blue-500/50 text-[10px] font-mono font-bold text-blue-200">SHOT {Math.min(currentShotIndex + 1, activeProject.shots.length)} / {activeProject.shots.length}</div>
+        <button onClick={() => onNavigate('editing')} className="px-3 py-2 rounded-full bg-black/60 border border-white/10 text-xs font-semibold text-blue-300">Editor</button>
+      </header>
 
-        <div className="px-4 py-1.5 rounded-full bg-blue-600/30 border border-blue-500/50 backdrop-blur-md text-xs font-mono font-bold text-blue-300">
-          SHOT {currentShotIndex + 1} OF {activeProject.shots.length}
+      <main className="relative flex-1 w-full min-h-0 bg-[#080b0d] flex items-center justify-center overflow-hidden">
+        <video ref={videoRef} autoPlay playsInline muted className="absolute inset-0 w-full h-full object-cover" />
+        <div className="absolute inset-0 pointer-events-none grid grid-cols-3 grid-rows-3 border border-white/20">
+          {Array.from({ length: 9 }, (_, i) => <div key={i} className={(i % 3 !== 2 ? 'border-r ' : '') + (i < 6 ? 'border-b ' : '') + 'border-white/25'} />)}
         </div>
-
-        <button
-          onClick={() => onNavigate('editing')}
-          className="px-3.5 py-1.5 rounded-full bg-black/60 border border-white/10 backdrop-blur-md text-xs font-semibold text-blue-400"
-        >
-          Editor
-        </button>
-      </div>
-
-      {/* Camera Viewport */}
-      <div className="relative flex-1 w-full h-full bg-[#0d0d0d] flex items-center justify-center overflow-hidden">
-        {cameraError && (
-          <div className="absolute inset-0 z-20 bg-zinc-900/90 flex flex-col items-center justify-center p-6 text-center">
-            <Camera className="w-12 h-12 text-zinc-600 mb-3 animate-pulse" />
-            <h4 className="font-bold text-base text-white mb-1">Camera Simulator Mode</h4>
-            <p className="text-xs text-zinc-400 max-w-xs mb-6">{cameraError}</p>
-            <button
-              onClick={() => setCameraError(null)}
-              className="px-6 py-2.5 bg-blue-600 text-white font-bold text-xs rounded-xl"
-            >
-              Dismiss
-            </button>
-          </div>
-        )}
-
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          muted
-          className="absolute inset-0 w-full h-full object-cover"
-        />
-
-        {/* Framing Guides & Grid */}
-        <div className="absolute inset-0 pointer-events-none grid grid-cols-3 grid-rows-3 border border-white/10">
-          <div className="border-r border-b border-white/10" />
-          <div className="border-r border-b border-white/10" />
-          <div className="border-b border-white/10" />
-          <div className="border-r border-b border-white/10" />
-          <div className="border-r border-b border-white/10" />
-          <div className="border-b border-white/10" />
-          <div className="border-r border-white/10" />
-          <div className="border-r border-white/10" />
-          <div />
-        </div>
-
-        {/* AI Director Coaching Overlay */}
-        {currentShot && (
-          <div className="absolute top-20 left-6 right-6 z-20 bg-black/70 backdrop-blur-md border border-white/20 rounded-3xl p-4 shadow-2xl animate-fade-in">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-[10px] font-mono text-blue-400 uppercase tracking-widest">{currentShot.cameraAngle}</span>
-              <span className="text-[10px] font-mono text-zinc-400">{currentShot.duration}s • {currentShot.suggestedFps}fps</span>
+        <div className="absolute top-16 left-3 right-3 z-10 max-w-lg mx-auto rounded-xl bg-black/65 backdrop-blur-md border border-white/15 px-3 py-2">
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-[9px] text-blue-300 uppercase tracking-widest">Current shot</p>
+              <p className="text-xs font-bold truncate">{currentShot?.name || 'Create a shot plan first'}</p>
+              <p className="text-[10px] text-zinc-300 truncate">{currentShot?.cameraAngle || 'Wide'} · {currentShot?.cameraMovement || 'Hold steady'} · {currentShot?.suggestedFps || 30} fps</p>
             </div>
-            <h3 className="font-bold text-white text-base mb-1">{currentShot.name}</h3>
-            <p className="text-xs text-zinc-300 mb-2">{currentShot.subjectAction}</p>
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-600/20 border border-blue-500/40 text-blue-300 text-xs font-semibold">
-              <Compass className="w-3.5 h-3.5 animate-spin" />
-              <span>Movement: {currentShot.cameraMovement}</span>
-            </div>
-          </div>
-        )}
-
-        {/* Recording Timer */}
-        {isRecording && (
-          <div className="absolute top-44 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 px-4 py-1.5 rounded-full bg-red-600 text-white font-mono text-xs shadow-xl animate-pulse">
-            <span className="w-2.5 h-2.5 rounded-full bg-white animate-ping" />
-            <span>RECORDING 00:{recordingSeconds.toString().padStart(2, '0')}</span>
-          </div>
-        )}
-      </div>
-
-      {/* Review Modal if Clip Recorded */}
-      {reviewClipUrl && (
-        <div className="absolute inset-0 z-50 bg-black/95 backdrop-blur-xl flex flex-col items-center justify-between p-6">
-          <div className="w-full max-w-md text-center pt-4">
-            <span className="text-xs font-mono text-blue-400 uppercase tracking-widest">Take Verification</span>
-            <h3 className="font-bold text-white text-lg">{currentShot.name}</h3>
-          </div>
-
-          <div className="w-full max-w-sm aspect-[9/16] bg-zinc-900 rounded-3xl overflow-hidden border border-zinc-800 flex items-center justify-center relative">
-            <video src={reviewClipUrl} controls autoPlay playsInline className="w-full h-full object-cover" />
-          </div>
-
-          <div className="w-full max-w-md flex items-center gap-3 pb-6">
-            <button
-              onClick={() => setReviewClipUrl(null)}
-              className="flex-1 py-3.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-white font-bold text-xs rounded-2xl"
-            >
-              Retake Shot
-            </button>
-            <button
-              onClick={handleApproveTake}
-              className="flex-1 py-3.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-2xl shadow-xl shadow-blue-600/30 flex items-center justify-center gap-2"
-            >
-              <Check className="w-4 h-4" />
-              <span>Approve Take</span>
-            </button>
+            <button type="button" onClick={() => { setVoiceHints(v => !v); if ('speechSynthesis' in window) window.speechSynthesis.cancel(); }} aria-label={voiceHints ? 'Mute voice hints' : 'Enable voice hints'} className="w-9 h-9 shrink-0 rounded-xl bg-white/10 flex items-center justify-center">{voiceHints ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}</button>
           </div>
         </div>
-      )}
 
-      {/* Bottom Camera Controls Bar */}
-      <div className="absolute bottom-0 left-0 right-0 z-30 p-8 bg-gradient-to-t from-black via-black/80 to-transparent flex items-center justify-around">
-        <button
-          onClick={() => {
-            if (currentShotIndex > 0) setCurrentShotIndex(currentShotIndex - 1);
-          }}
-          className="w-12 h-12 rounded-2xl bg-zinc-900/80 border border-white/10 flex items-center justify-center text-zinc-300"
-        >
-          <ChevronRight className="w-5 h-5 rotate-180" />
-        </button>
+        <LiveGuidancePanel videoRef={videoRef} currentShot={currentShot ? [currentShot.name, currentShot.cameraMovement, currentShot.framingInstructions].join('. ') : 'Scenic establishing shot'} isRecording={isRecording} />
 
-        {!isRecording ? (
-          <button
-            onClick={handleStartRecording}
-            className="w-20 h-20 rounded-full bg-red-600 hover:bg-red-500 border-4 border-white/40 flex items-center justify-center text-white shadow-2xl shadow-red-600/50 transition-all active:scale-95"
-            title="Start Recording"
-          >
-            <div className="w-8 h-8 rounded-full bg-white" />
-          </button>
-        ) : (
-          <button
-            onClick={handleStopRecording}
-            className="w-20 h-20 rounded-full bg-zinc-900 border-4 border-red-600 flex items-center justify-center text-red-500 shadow-2xl shadow-red-600/50 transition-all active:scale-95 animate-pulse"
-            title="Stop Recording"
-          >
-            <Square className="w-8 h-8 fill-current" />
-          </button>
-        )}
+        {isRecording && <div className="absolute top-32 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-600 text-white font-mono text-xs"><span className="w-2 h-2 rounded-full bg-white animate-pulse" /> REC {String(Math.floor(recordingSeconds / 60)).padStart(2, '0')}:{String(recordingSeconds % 60).padStart(2, '0')}</div>}
 
-        <button
-          onClick={() => {
-            if (currentShotIndex + 1 < activeProject.shots.length) setCurrentShotIndex(currentShotIndex + 1);
-          }}
-          className="w-12 h-12 rounded-2xl bg-zinc-900/80 border border-white/10 flex items-center justify-center text-zinc-300"
-        >
-          <ChevronRight className="w-5 h-5" />
-        </button>
-      </div>
+        {cameraError && <div className="absolute inset-x-4 top-1/2 -translate-y-1/2 z-40 rounded-2xl border border-amber-300/30 bg-black/95 p-4 text-center">
+          <ShieldCheck className="w-8 h-8 mx-auto mb-2 text-amber-300" />
+          <p className="text-sm font-bold mb-2">Camera permission / access issue</p>
+          <p className="text-xs leading-relaxed text-zinc-200 mb-4">{cameraError}</p>
+          <button type="button" disabled={isOpeningCamera} onClick={() => void openCamera()} className="px-4 py-3 rounded-xl bg-blue-600 text-xs font-bold disabled:opacity-50"><RefreshCw className={'inline w-3 h-3 mr-1 ' + (isOpeningCamera ? 'animate-spin' : '')} /> {isOpeningCamera ? 'Opening camera…' : 'Retry camera'}</button>
+        </div>}
+      </main>
+
+      {reviewClipUrl && <div className="absolute inset-0 z-50 bg-black/95 backdrop-blur-xl flex flex-col items-center justify-between p-4">
+        <div className="text-center pt-4"><span className="text-[10px] text-blue-300 uppercase tracking-widest">Take review</span><h3 className="font-bold text-lg">{currentShot?.name || 'Recorded clip'}</h3></div>
+        <div className="w-full max-w-sm flex-1 min-h-0 my-4 bg-zinc-900 rounded-2xl overflow-hidden border border-zinc-800"><video src={reviewClipUrl} controls autoPlay playsInline className="w-full h-full object-contain" /></div>
+        <div className="w-full max-w-md flex gap-3 pb-4">
+          <button onClick={handleRetake} className="flex-1 py-3.5 bg-zinc-900 border border-zinc-700 text-white font-bold text-xs rounded-2xl">Retake</button>
+          <button onClick={handleApproveTake} className="flex-1 py-3.5 bg-blue-600 text-white font-bold text-xs rounded-2xl flex items-center justify-center gap-2"><Check className="w-4 h-4" /> Approve take</button>
+        </div>
+      </div>}
+
+      <footer className="absolute bottom-0 left-0 right-0 z-30 p-4 pt-10 bg-gradient-to-t from-black via-black/85 to-transparent flex items-center justify-around">
+        <button type="button" disabled={isRecording || currentShotIndex <= 0} onClick={() => setCurrentShotIndex(i => Math.max(0, i - 1))} aria-label="Previous shot" className="w-12 h-12 rounded-2xl bg-zinc-900/90 border border-white/10 flex items-center justify-center disabled:opacity-30"><ChevronRight className="w-5 h-5 rotate-180" /></button>
+        {!isRecording ? <button type="button" onClick={handleStartRecording} disabled={!stream || !currentShot} aria-label="Start recording" className="w-16 h-16 rounded-full bg-red-600 border-4 border-white/60 flex items-center justify-center shadow-xl disabled:opacity-40"><span className="w-7 h-7 rounded-full bg-white" /></button> : <button type="button" onClick={handleStopRecording} aria-label="Stop recording" className="w-16 h-16 rounded-full bg-zinc-900 border-4 border-red-500 flex items-center justify-center text-red-400 shadow-xl"><Square className="w-7 h-7 fill-current" /></button>}
+        <button type="button" disabled={isRecording || currentShotIndex + 1 >= activeProject.shots.length} onClick={() => setCurrentShotIndex(i => Math.min(activeProject.shots.length - 1, i + 1))} aria-label="Next shot" className="w-12 h-12 rounded-2xl bg-zinc-900/90 border border-white/10 flex items-center justify-center disabled:opacity-30"><ChevronRight className="w-5 h-5" /></button>
+      </footer>
     </div>
   );
 };

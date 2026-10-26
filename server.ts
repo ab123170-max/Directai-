@@ -29,24 +29,34 @@ async function startServer() {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
   });
 
+  // This endpoint makes a real Gemini request; it does not infer status from server uptime.
+  app.get('/api/ai/health', async (_req, res) => {
+    if (!apiKey || ['MY_GEMINI_API_KEY', 'dummy-key'].includes(apiKey)) {
+      return res.status(503).json({ ok: false, provider: 'gemini', reason: 'GEMINI_API_KEY is missing or is a placeholder.' });
+    }
+    const startedAt = Date.now();
+    try {
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.8-flash',
+        contents: 'Reply with exactly: GEMINI_OK',
+        config: { thinkingConfig: { thinkingLevel: 'low' } },
+      });
+      const text = (response.text || '').trim();
+      if (!text) throw new Error('Gemini returned an empty response.');
+      return res.json({ ok: true, provider: 'gemini', model: 'gemini-3.8-flash', latencyMs: Date.now() - startedAt, response: text.slice(0, 100) });
+    } catch (error: any) {
+      console.error('Gemini health check failed:', error);
+      return res.status(502).json({ ok: false, provider: 'gemini', model: 'gemini-3.8-flash', reason: error?.message || 'Gemini request failed.' });
+    }
+  });
+
   // AI Scene Analysis endpoint
   app.post('/api/ai/analyze-scene', async (req, res) => {
     try {
       const { imageBase64, mode, currentShot } = req.body;
       
-      if (!apiKey || apiKey === 'MY_GEMINI_API_KEY' || apiKey === 'dummy-key') {
-        // Return intelligent fallback recommendations based on mode
-        return res.json({
-          success: true,
-          fallback: true,
-          recommendations: getFallbackRecommendations(mode),
-          analysis: {
-            subject: mode === 'food' ? 'Delicious Culinary Dish' : mode === 'product' ? 'Commercial Product' : 'Subject in Frame',
-            lighting: 'Good diffused lighting. Maintain steady angle.',
-            composition: 'Rule of thirds applied correctly.',
-            stability: 'Stable. Hold position for 4 seconds.'
-          }
-        });
+      if (!apiKey || ['MY_GEMINI_API_KEY', 'dummy-key'].includes(apiKey)) {
+        return res.status(503).json({ success: false, fallback: false, error: 'Gemini is not configured. Add GEMINI_API_KEY to the server environment.' });
       }
 
       const parts: any[] = [];
@@ -95,10 +105,10 @@ async function startServer() {
       });
 
       const result = JSON.parse(response.text || '{}');
-      res.json({ success: true, ...result });
+      res.json({ success: true, fallback: false, model: 'gemini-3.8-flash', ...result });
     } catch (error: any) {
       console.error('AI Scene Analysis error:', error);
-      res.status(500).json({ success: false, error: error.message || 'Analysis failed', recommendations: getFallbackRecommendations('general') });
+      res.status(502).json({ success: false, fallback: false, error: error.message || 'Gemini scene analysis failed.' });
     }
   });
 
@@ -107,12 +117,8 @@ async function startServer() {
     try {
       const { title, category, description } = req.body;
 
-      if (!apiKey || apiKey === 'MY_GEMINI_API_KEY' || apiKey === 'dummy-key') {
-        return res.json({
-          success: true,
-          fallback: true,
-          shots: getFallbackShotList(category || 'general')
-        });
+      if (!apiKey || ['MY_GEMINI_API_KEY', 'dummy-key'].includes(apiKey)) {
+        return res.status(503).json({ success: false, fallback: false, error: 'Gemini is not configured. Add GEMINI_API_KEY to the server environment.' });
       }
 
       const prompt = `Generate a professional cinematic shot list for a video project titled "${title || 'Untitled Project'}", category "${category || 'general'}", description "${description || 'Professional video'}".
@@ -152,10 +158,10 @@ async function startServer() {
       });
 
       const shots = JSON.parse(response.text || '[]');
-      res.json({ success: true, shots });
+      res.json({ success: true, fallback: false, model: 'gemini-3.8-flash', shots });
     } catch (error: any) {
       console.error('Shot list generation error:', error);
-      res.status(500).json({ success: false, error: error.message, shots: getFallbackShotList('general') });
+      res.status(502).json({ success: false, fallback: false, error: error?.message || 'Gemini shot-list generation failed.' });
     }
   });
 
