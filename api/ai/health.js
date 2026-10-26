@@ -18,17 +18,17 @@ export default async function handler(req, res) {
 
   try {
     const ai = new GoogleGenAI({ apiKey });
-    const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+    const model = process.env.GEMINI_MODEL || "gemini-3.8-flash";
     const result = await ai.models.generateContent({
       model,
       contents: "Reply with exactly: GEMINI_OK"
     });
-    const text = result.text || "";
+    const responseText = result.text || "";
     return res.status(200).json({
-      ok: text.includes("GEMINI_OK"),
+      ok: responseText.includes("GEMINI_OK"),
       provider: "gemini",
       model,
-      response: text.slice(0, 80),
+      response: responseText.slice(0, 80),
       timestamp: new Date().toISOString()
     });
   } catch (error) {
