@@ -34,6 +34,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -156,6 +157,14 @@ private fun CameramanApp() {
                             shots = shots,
                             completed = completed,
                             onToggleShot = { id -> completed = if (id in completed) completed - id else completed + id },
+                            onMoveShot = { from, to ->
+                                if (from in shots.indices && to in shots.indices) {
+                                    val reordered = shots.toMutableList()
+                                    val moved = reordered.removeAt(from)
+                                    reordered.add(to, moved)
+                                    shots = reordered
+                                }
+                            },
                             onShoot = { tab = StudioTab.Camera }
                         )
                         StudioTab.Director -> DirectorScreen(
@@ -316,10 +325,10 @@ private fun makeShots(style: String, duration: Int): List<Shot> {
 private fun PlanScreen(
     title: String, onTitleChange: (String) -> Unit, style: String, onStyleChange: (String) -> Unit,
     duration: Int, onDurationChange: (Int) -> Unit, shots: List<Shot>, completed: Set<Int>,
-    onToggleShot: (Int) -> Unit, onShoot: () -> Unit
+    onToggleShot: (Int) -> Unit, onMoveShot: (Int, Int) -> Unit, onShoot: () -> Unit
 ) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        item { StudioHeader("Pre-production", "Shot planner", "A practical shot list for your next music video or Reel.") }
+        item { StudioHeader("Module 07 · Production", "AI shot sequencer", "Arrange your opening, hero shots, detail cutaways and ending into a shootable sequence.") }
         item {
             OutlinedTextField(value = title, onValueChange = onTitleChange, modifier = Modifier.fillMaxWidth(), label = { Text("Project name") }, singleLine = true, shape = RoundedCornerShape(15.dp))
         }
@@ -340,23 +349,51 @@ private fun PlanScreen(
             Slider(value = duration.toFloat(), onValueChange = { onDurationChange(it.toInt().coerceAtLeast(15)) }, valueRange = 15f..90f, steps = 4)
         }
         item {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Your shot sequence", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.weight(1f))
-                Text("${completed.size}/${shots.size} done", color = Cyan, fontSize = 11.sp)
+            Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF201A37)), shape = RoundedCornerShape(18.dp)) {
+                Column(Modifier.fillMaxWidth().padding(15.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Timeline, null, tint = Cyan)
+                        Spacer(Modifier.width(8.dp))
+                        Text("MODULE 7 · SHOT SEQUENCE", color = Cyan, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold)
+                        Spacer(Modifier.weight(1f))
+                        Text("${completed.size}/${shots.size}", color = Color.White, fontWeight = FontWeight.Bold)
+                    }
+                    LinearProgressIndicator(
+                        progress = { if (shots.isEmpty()) 0f else completed.size.toFloat() / shots.size },
+                        modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape),
+                        color = Cyan,
+                        trackColor = Color.White.copy(alpha = .12f)
+                    )
+                    Text("Estimated footage: ${shots.sumOf { it.duration }} seconds · drag-free reorder with ↑ / ↓ controls", color = Muted, fontSize = 10.sp)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf("OPENING", "BUILD", "HERO", "ENDING").forEach { phase ->
+                            Surface(color = Violet.copy(alpha = .14f), shape = RoundedCornerShape(7.dp)) {
+                                Text(phase, Modifier.padding(horizontal = 7.dp, vertical = 5.dp), color = Violet, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
             }
         }
-        items(shots) { shot ->
+        itemsIndexed(shots) { index, shot ->
             Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(18.dp)) {
                 Column(Modifier.fillMaxWidth().padding(15.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Surface(color = Violet.copy(alpha = .16f), shape = RoundedCornerShape(10.dp)) {
-                            Text("%02d".format(shot.id), Modifier.padding(horizontal = 11.dp, vertical = 8.dp), color = Violet, fontWeight = FontWeight.ExtraBold)
+                            Text("%02d".format(index + 1), Modifier.padding(horizontal = 11.dp, vertical = 8.dp), color = Violet, fontWeight = FontWeight.ExtraBold)
                         }
                         Spacer(Modifier.width(11.dp))
                         Column(Modifier.weight(1f)) {
                             Text(shot.title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                             Text("${shot.angle} · ${shot.duration}s", color = Muted, fontSize = 10.sp)
+                        }
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            IconButton(onClick = { if (index > 0) onMoveShot(index, index - 1) }, enabled = index > 0, modifier = Modifier.size(28.dp)) {
+                                Icon(Icons.Default.KeyboardArrowUp, "Move shot earlier", tint = if (index > 0) Cyan else Muted)
+                            }
+                            IconButton(onClick = { if (index < shots.lastIndex) onMoveShot(index, index + 1) }, enabled = index < shots.lastIndex, modifier = Modifier.size(28.dp)) {
+                                Icon(Icons.Default.KeyboardArrowDown, "Move shot later", tint = if (index < shots.lastIndex) Cyan else Muted)
+                            }
                         }
                         Checkbox(checked = shot.id in completed, onCheckedChange = { onToggleShot(shot.id) })
                     }
