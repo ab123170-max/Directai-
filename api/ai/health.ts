@@ -8,7 +8,6 @@ export default async function handler(_req: VercelRequest, res: VercelResponse) 
     const response = await ai.models.generateContent({
       model: GEMINI_MODEL,
       contents: 'Reply with exactly: GEMINI_OK',
-      config: { thinkingConfig: { thinkingLevel: 'low' } },
     });
     const answer = (response.text || '').trim();
     if (!answer) return res.status(502).json({ ok: false, provider: 'gemini', reason: 'Gemini returned an empty response.' });
