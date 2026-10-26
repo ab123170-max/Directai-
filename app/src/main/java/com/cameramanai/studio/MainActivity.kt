@@ -10,6 +10,8 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.speech.tts.TextToSpeech
+import android.widget.VideoView
+import android.widget.MediaController
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -97,6 +99,7 @@ private fun CameramanApp() {
     var shots by remember { mutableStateOf(makeShots(style, duration)) }
     var completed by remember { mutableStateOf(setOf<Int>()) }
     var notice by remember { mutableStateOf("") }
+    var recordedClips by remember { mutableStateOf(listOf<RecordedClip>()) }
 
     MaterialTheme(
         colorScheme = darkColorScheme(
@@ -177,13 +180,21 @@ private fun CameramanApp() {
                             activeShot = shots.firstOrNull { it.id !in completed },
                             onShotCaptured = { id -> completed = completed + id },
                             onBack = { tab = StudioTab.Plan },
-                            onSaved = { path -> notice = "Saved video: ${File(path).name}" }
+                            onSaved = { path, shotId, shotTitle ->
+                                recordedClips = listOf(RecordedClip(path, shotId, shotTitle)) + recordedClips
+                                notice = "Saved video: ${File(path).name}"
+                            }
                         )
                         StudioTab.Edit -> EditScreen(
                             title = projectTitle,
                             completedCount = completed.size,
                             totalCount = shots.size,
                             notice = notice,
+                            clips = recordedClips,
+                            onRetake = { clip ->
+                                clip.shotId?.let { id -> completed = completed - id }
+                                tab = StudioTab.Camera
+                            },
                             onCamera = { tab = StudioTab.Camera },
                             onPlan = { tab = StudioTab.Plan }
                         )
@@ -302,6 +313,8 @@ private fun ToolCard(icon: androidx.compose.ui.graphics.vector.ImageVector, titl
 }
 
 private data class Shot(val id: Int, val title: String, val angle: String, val movement: String, val duration: Int, val cue: String)
+
+private data class RecordedClip(val path: String, val shotId: Int?, val shotTitle: String)
 
 private fun makeShots(style: String, duration: Int): List<Shot> {
     val base = listOf(
@@ -596,7 +609,7 @@ private fun FlowChips(options: List<String>, selected: String, onSelect: (String
 }
 
 @Composable
-private fun CameraScreen(activeShot: Shot?, onShotCaptured: (Int) -> Unit, onBack: () -> Unit, onSaved: (String) -> Unit) {
+private fun CameraScreen(activeShot: Shot?, onShotCaptured: (Int) -> Unit, onBack: () -> Unit, onSaved: (String, Int?, String) -> Unit) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val executor = remember { ContextCompat.getMainExecutor(context) }
@@ -1108,7 +1121,7 @@ private fun CameraScreen(activeShot: Shot?, onShotCaptured: (Int) -> Unit, onBac
                                                 checkedExposure = false
                                                 checkedBackground = false
                                                 checkedStability = false
-                                                onSaved(file.absolutePath)
+                                                onSaved(file.absolutePath, activeShot?.id, activeShot?.title ?: "Unassigned clip")
                                             } else {
                                                 status = "Recording failed (code ${event.error}). Please try again."
                                             }
@@ -1150,9 +1163,18 @@ private fun VerticalGridLine() {
 }
 
 @Composable
-private fun EditScreen(title: String, completedCount: Int, totalCount: Int, notice: String, onCamera: () -> Unit, onPlan: () -> Unit) {
+private fun EditScreen(
+    title: String,
+    completedCount: Int,
+    totalCount: Int,
+    notice: String,
+    clips: List<RecordedClip>,
+    onRetake: (RecordedClip) -> Unit,
+    onCamera: () -> Unit,
+    onPlan: () -> Unit
+) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(15.dp)) {
-        item { StudioHeader("Post-production", "Edit workspace", "Organize your shoot and check what is ready for editing.") }
+        item { StudioHeader("Module 09 · Review", "Clip review & retake", "Watch the footage you recorded, check each take, and return to the same planned shot when it needs another take.") }
         item {
             Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(22.dp)) {
                 Column(Modifier.padding(18.dp)) {
@@ -1160,21 +1182,72 @@ private fun EditScreen(title: String, completedCount: Int, totalCount: Int, noti
                     Spacer(Modifier.height(8.dp))
                     LinearProgressIndicator(progress = { if (totalCount == 0) 0f else completedCount.toFloat() / totalCount }, modifier = Modifier.fillMaxWidth(), color = Cyan, trackColor = Color.White.copy(alpha = .08f))
                     Spacer(Modifier.height(8.dp))
-                    Text("$completedCount of $totalCount planned shots marked complete", color = Muted, fontSize = 11.sp)
+                    Text("$completedCount of $totalCount planned shots marked complete · ${clips.size} saved clip(s)", color = Muted, fontSize = 11.sp)
                 }
             }
         }
         item { ToolCard(Icons.Default.Videocam, "Record another clip", "Open the CameraX recording screen", "SHOOT", onCamera) }
-        item { ToolCard(Icons.Default.Movie, "Review shot sequence", "Check off shots as you capture them", "PLAN", onPlan) }
+        item { ToolCard(Icons.Default.Movie, "Review shot sequence", "Check the planned shot list", "PLAN", onPlan) }
         item {
-            Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(20.dp)) {
-                Column(Modifier.padding(16.dp)) {
-                    Text("Editing status", color = Color.White, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(6.dp))
-                    Text("Native timeline, transitions, color grading and final export are the next build phase. This screen does not pretend those tools are finished.", color = Muted, fontSize = 12.sp, lineHeight = 18.sp)
-                    if (notice.isNotBlank()) { Spacer(Modifier.height(10.dp)); Text(notice, color = Cyan, fontSize = 11.sp) }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.PlayCircle, null, tint = Cyan, modifier = Modifier.size(21.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Recorded clips", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+        if (clips.isEmpty()) {
+            item {
+                Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(20.dp)) {
+                    Column(Modifier.fillMaxWidth().padding(22.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Default.VideoLibrary, null, tint = Violet, modifier = Modifier.size(40.dp))
+                        Spacer(Modifier.height(8.dp))
+                        Text("No clips to review yet", color = Color.White, fontWeight = FontWeight.Bold)
+                        Text("Record a shot first. Your saved clips will appear here for playback and retakes.", color = Muted, fontSize = 12.sp, lineHeight = 18.sp)
+                    }
                 }
             }
+        } else {
+            items(clips, key = { it.path }) { clip ->
+                Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(20.dp)) {
+                    Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                        Text(clip.shotTitle, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text(File(clip.path).name, color = Muted, fontSize = 10.sp)
+                        val clipFile = File(clip.path)
+                        Text(if (clipFile.exists()) "File size: ${"%.1f".format(Locale.US, clipFile.length() / (1024f * 1024f))} MB" else "File is no longer available", color = Cyan, fontSize = 10.sp)
+                        if (clipFile.exists()) {
+                            AndroidView(
+                                modifier = Modifier.fillMaxWidth().height(190.dp).clip(RoundedCornerShape(14.dp)),
+                                factory = { context ->
+                                    VideoView(context).apply {
+                                        setVideoPath(clip.path)
+                                        setMediaController(MediaController(context).also { it.setAnchorView(this) })
+                                    }
+                                },
+                                update = { view ->
+                                    if (view.tag != clip.path) {
+                                        view.tag = clip.path
+                                        view.setVideoPath(clip.path)
+                                    }
+                                }
+                            )
+                        }
+                        Button(onClick = { onRetake(clip) }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Violet, contentColor = Ink)) {
+                            Icon(Icons.Default.Replay, null); Spacer(Modifier.width(6.dp)); Text("Retake this shot")
+                        }
+                        Text("Retake keeps the old file. It marks this planned shot incomplete so the camera can guide you through it again.", color = Muted, fontSize = 10.sp, lineHeight = 14.sp)
+                    }
+                }
+            }
+        }
+        if (notice.isNotBlank()) {
+            item {
+                Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF123C35)), shape = RoundedCornerShape(14.dp)) {
+                    Text(notice, color = Cyan, fontSize = 11.sp, modifier = Modifier.padding(12.dp))
+                }
+            }
+        }
+        item {
+            Text("Review tools help you inspect footage and repeat a shot. Automatic blur, focus, exposure, and audio-quality scoring are not included in this module yet.", color = Muted, fontSize = 10.sp, lineHeight = 15.sp)
         }
     }
 }
