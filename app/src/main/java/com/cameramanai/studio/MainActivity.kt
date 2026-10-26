@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.speech.tts.TextToSpeech
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -68,7 +69,7 @@ class MainActivity : ComponentActivity() {
 }
 
 private enum class StudioTab(val label: String) {
-    Home("Studio"), Plan("Shot list"), Camera("Camera"), Edit("Edit"), Settings("Settings")
+    Home("Studio"), Plan("Shot list"), Director("Director"), Camera("Camera"), Edit("Edit"), Settings("Settings")
 }
 
 @Composable
@@ -100,6 +101,7 @@ private fun CameramanApp() {
                                     when (item) {
                                         StudioTab.Home -> Icons.Default.Dashboard
                                         StudioTab.Plan -> Icons.Default.Movie
+                                        StudioTab.Director -> Icons.Default.AutoAwesome
                                         StudioTab.Camera -> Icons.Default.Videocam
                                         StudioTab.Edit -> Icons.Default.Tune
                                         StudioTab.Settings -> Icons.Default.Settings
@@ -126,7 +128,8 @@ private fun CameramanApp() {
                             totalCount = shots.size,
                             onStart = { tab = StudioTab.Plan },
                             onCamera = { tab = StudioTab.Camera },
-                            onEdit = { tab = StudioTab.Edit }
+                            onEdit = { tab = StudioTab.Edit },
+                            onDirector = { tab = StudioTab.Director }
                         )
                         StudioTab.Plan -> PlanScreen(
                             title = projectTitle,
@@ -139,6 +142,12 @@ private fun CameramanApp() {
                             completed = completed,
                             onToggleShot = { id -> completed = if (id in completed) completed - id else completed + id },
                             onShoot = { tab = StudioTab.Camera }
+                        )
+                        StudioTab.Director -> DirectorScreen(
+                            style = style,
+                            onStyleChange = { style = it; shots = makeShots(it, duration); completed = emptySet() },
+                            onOpenCamera = { tab = StudioTab.Camera },
+                            onOpenPlan = { tab = StudioTab.Plan }
                         )
                         StudioTab.Camera -> CameraScreen(
                             onBack = { tab = StudioTab.Plan },
@@ -170,7 +179,7 @@ private fun StudioHeader(eyebrow: String, title: String, subtitle: String? = nul
 }
 
 @Composable
-private fun HomeScreen(title: String, completedCount: Int, totalCount: Int, onStart: () -> Unit, onCamera: () -> Unit, onEdit: () -> Unit) {
+private fun HomeScreen(title: String, completedCount: Int, totalCount: Int, onStart: () -> Unit, onCamera: () -> Unit, onEdit: () -> Unit, onDirector: () -> Unit) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 26.dp, bottom = 24.dp),
@@ -225,6 +234,7 @@ private fun HomeScreen(title: String, completedCount: Int, totalCount: Int, onSt
         item { Text("Your workflow", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold) }
         item { ToolCard(Icons.Default.Movie, "AI shot planner", "Build a sequence with angles and movements", "PLAN", onStart) }
         item { ToolCard(Icons.Default.Videocam, "Camera director", "Open the live camera and record clips", "SHOOT", onCamera) }
+        item { ToolCard(Icons.Default.AutoAwesome, "Live shot director", "Get framing, angle and movement coaching", "DIRECT", onDirector) }
         item { ToolCard(Icons.Default.Tune, "Editing workspace", "Review your project progress", "EDIT", onEdit) }
         item { Text("Current project", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold) }
         item {
@@ -349,6 +359,173 @@ private fun PlanScreen(
         item {
             Button(onClick = onShoot, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(16.dp)) {
                 Icon(Icons.Default.Videocam, null); Spacer(Modifier.width(8.dp)); Text("Open camera and shoot")
+            }
+        }
+    }
+}
+
+@Composable
+private fun DirectorScreen(
+    style: String,
+    onStyleChange: (String) -> Unit,
+    onOpenCamera: () -> Unit,
+    onOpenPlan: () -> Unit
+) {
+    val context = LocalContext.current
+    var scene by remember { mutableStateOf("Beautiful scenery") }
+    var subject by remember { mutableStateOf("Landscape") }
+    var mood by remember { mutableStateOf("Cinematic") }
+    var directionIndex by remember { mutableIntStateOf(0) }
+    var voiceStatus by remember { mutableStateOf("Choose a scene to get started") }
+    val cues = remember(scene, subject, mood) { makeDirectorCues(scene, subject, mood) }
+    val cue = cues[directionIndex.coerceIn(0, cues.lastIndex)]
+
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        item { StudioHeader("Module 02 · Director", "Your shot coach", "Choose the scene and get practical framing and movement directions before recording.") }
+        item {
+            Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(22.dp)) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("WHAT ARE YOU FILMING?", color = Cyan, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+                    Text("Scene type", color = Color.White, fontWeight = FontWeight.Bold)
+                    FlowChips(listOf("Beautiful scenery", "Person / portrait", "Dance / performance", "Food / product", "Travel / walking"), scene) { scene = it; directionIndex = 0 }
+                    Text("Main subject", color = Color.White, fontWeight = FontWeight.Bold)
+                    FlowChips(listOf("Landscape", "One person", "Group", "Moving subject", "Small detail"), subject) { subject = it; directionIndex = 0 }
+                    Text("Mood", color = Color.White, fontWeight = FontWeight.Bold)
+                    FlowChips(listOf("Cinematic", "Energetic", "Romantic", "Dramatic"), mood) { mood = it; directionIndex = 0 }
+                    Text("Current planner style: $style", color = Muted, fontSize = 10.sp)
+                    OutlinedButton(onClick = { onStyleChange(moodToStyle(mood)) }, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Default.Tune, null); Spacer(Modifier.width(6.dp)); Text("Use mood in shot planner")
+                    }
+                }
+            }
+        }
+        item {
+            Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF201A37)), shape = RoundedCornerShape(24.dp)) {
+                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.AutoAwesome, null, tint = Cyan)
+                        Spacer(Modifier.width(8.dp))
+                        Text("DIRECTOR'S NEXT SHOT", color = Cyan, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.3.sp)
+                        Spacer(Modifier.weight(1f))
+                        Text("${directionIndex + 1}/${cues.size}", color = Muted, fontSize = 11.sp)
+                    }
+                    Text(cue.title, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
+                    Surface(color = Violet.copy(alpha = .17f), shape = RoundedCornerShape(12.dp)) {
+                        Text(cue.angle, Modifier.padding(horizontal = 12.dp, vertical = 9.dp), color = Violet, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
+                    Text("CAMERA MOVE", color = Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text(cue.movement, color = Cyan, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text(cue.instruction, color = Color(0xFFE0DDEB), fontSize = 13.sp, lineHeight = 20.sp)
+                    Text("AVOID: ${cue.avoid}", color = Color(0xFFFFB9C0), fontSize = 11.sp, lineHeight = 16.sp)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = {
+                            try {
+                                val engine = TextToSpeech(context) { result ->
+                                    if (result == TextToSpeech.SUCCESS) {
+                                        engine.language = Locale.US
+                                        engine.speak(cue.voiceLine, TextToSpeech.QUEUE_FLUSH, null, "director-cue")
+                                        voiceStatus = "Speaking direction"
+                                    } else voiceStatus = "Text-to-speech is unavailable"
+                                }
+                            } catch (_: Exception) { voiceStatus = "Text-to-speech is unavailable" }
+                        }, modifier = Modifier.weight(1f)) {
+                            Icon(Icons.Default.VolumeUp, null); Spacer(Modifier.width(5.dp)); Text("Speak cue")
+                        }
+                        Button(onClick = { directionIndex = (directionIndex + 1) % cues.size }, modifier = Modifier.weight(1f)) {
+                            Icon(Icons.Default.SkipNext, null); Spacer(Modifier.width(5.dp)); Text("Next shot")
+                        }
+                    }
+                    Text(voiceStatus, color = Muted, fontSize = 10.sp)
+                }
+            }
+        }
+        item {
+            Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(20.dp)) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Before you press record", color = Color.White, fontWeight = FontWeight.Bold)
+                    listOf("Clean the lens and check the background.", "Tap your subject on the preview to focus.", "Keep the horizon level and move slowly.", "Record 3 seconds before and after the main action.").forEach {
+                        Row(verticalAlignment = Alignment.Top) {
+                            Icon(Icons.Default.CheckCircle, null, tint = Cyan, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text(it, color = Muted, fontSize = 12.sp, lineHeight = 17.sp)
+                        }
+                    }
+                }
+            }
+        }
+        item {
+            Button(onClick = onOpenCamera, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(16.dp)) {
+                Icon(Icons.Default.Videocam, null); Spacer(Modifier.width(8.dp)); Text("Open camera for this shot")
+            }
+        }
+        item {
+            OutlinedButton(onClick = onOpenPlan, modifier = Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(16.dp)) {
+                Icon(Icons.Default.Movie, null); Spacer(Modifier.width(8.dp)); Text("View full shot list")
+            }
+        }
+        item { Text("This first version uses scene-based coaching rules on the phone. Live scene recognition and Gemini-powered custom direction are not connected yet.", color = Muted, fontSize = 10.sp, lineHeight = 16.sp) }
+    }
+}
+
+private data class DirectorCue(
+    val title: String, val angle: String, val movement: String,
+    val instruction: String, val avoid: String, val voiceLine: String
+)
+
+private fun moodToStyle(mood: String): String = when (mood) {
+    "Energetic" -> "Dance / performance"
+    "Dramatic" -> "Cinematic story"
+    else -> "Cinematic"
+}
+
+private fun makeDirectorCues(scene: String, subject: String, mood: String): List<DirectorCue> {
+    val landscape = scene == "Beautiful scenery" || subject == "Landscape"
+    val portrait = scene == "Person / portrait" || subject == "One person"
+    val performance = scene == "Dance / performance" || mood == "Energetic"
+    val product = scene == "Food / product" || subject == "Small detail"
+    return when {
+        landscape -> listOf(
+            DirectorCue("Reveal the location", "Wide establishing · eye level", "Slow push forward", "Hold the phone steady at chest height. Keep the horizon straight and leave space around the main view. Walk forward slowly for 4–5 seconds.", "Fast pans and a tilted horizon.", "Start wide. Keep the horizon level. Walk forward slowly."),
+            DirectorCue("Show foreground depth", "Wide · foreground framing", "Slide gently sideways", "Place a nearby leaf, rock, railing or branch near one edge. Move sideways slightly to reveal the scenery behind it.", "Blocking the main view with the foreground.", "Use a foreground object. Slide sideways gently."),
+            DirectorCue("Capture a detail", "Close-up · texture or nature", "Slow tilt or static hold", "Film moving leaves, water, flowers, clouds or a textured surface. Hold each detail for at least 3 seconds.", "Digital zoom and sudden movement.", "Find a small detail. Hold steady for three seconds."),
+            DirectorCue("Finish with scale", "Wide scenic frame", "Slow pull-back", "Include a person or clear object for scale if available. Pull back slowly, then hold the final composition for two seconds.", "Cutting off the skyline or subject.", "Finish wide. Pull back slowly, then hold the frame.")
+        )
+        portrait -> listOf(
+            DirectorCue("Introduce the person", "Medium shot · eye level", "Slow push-in", "Keep the eyes near the upper third. Ask the person to relax their shoulders and look just past the lens unless direct eye contact suits the scene.", "Camera below the chin or busy background.", "Frame from the waist up. Keep the eyes near the upper third."),
+            DirectorCue("Get a natural portrait", "Three-quarter angle", "Small side arc", "Move only a small arc around the person. Keep the face in soft light and focus on the nearer eye.", "A large, fast orbit or harsh backlight.", "Move in a small arc. Keep focus on the nearer eye."),
+            DirectorCue("Capture expression", "Close-up portrait", "Mostly still", "Ask for one clear emotion, then record a few seconds before and after the expression. Keep the camera still.", "Over-directing facial expressions.", "Hold still. Capture the expression before and after the moment."),
+            DirectorCue("Hero ending", "Medium-wide · slight low angle", "Slow pull-back", "Ask the person to hold a confident natural pose. Keep their head and shoulders inside the frame.", "Cutting off the head or moving too quickly.", "Hold a confident pose. Pull back slowly.")
+        )
+        performance -> listOf(
+            DirectorCue("Start with the hook", "Full-body wide", "Small controlled push-in", "Keep the dancer's feet and hands inside the frame. Leave room in the direction they move and start recording before the beat.", "Cropping feet or digital zoom.", "Frame the full body. Leave space for the movement."),
+            DirectorCue("Track the movement", "Full-body side angle", "Walk parallel smoothly", "Move parallel to the performer at a safe, steady pace. Keep distance consistent and let the action happen inside the frame.", "Walking backwards without checking your path.", "Track from the side. Keep your pace smooth and safe."),
+            DirectorCue("Add a detail cut", "Hands or footwork close-up", "Short static take", "Record one clean close-up of footwork, hands or an accessory, then stop for a cutaway.", "Shaking the phone while trying to zoom.", "Capture one detail close-up. Keep the phone still."),
+            DirectorCue("End on the signature move", "Medium-wide hero frame", "Gentle push-in then hold", "Start a little wider, move in gently during the signature moment, and hold the ending pose for two seconds.", "Stopping recording exactly on the action.", "Move in gently, then hold the final pose.")
+        )
+        product -> listOf(
+            DirectorCue("Show the whole subject", "Three-quarter product shot", "Slow push-in", "Use a clean background and soft side light. Keep the entire item visible and tap the subject to focus.", "Clutter, reflections and digital zoom.", "Show the whole subject. Use soft light and tap to focus."),
+            DirectorCue("Reveal texture", "Tight close-up", "Slow lateral slide", "Move the phone a short distance sideways to reveal texture. Keep the subject in focus and avoid casting your shadow.", "Getting so close that focus becomes blurry.", "Move sideways slowly to reveal texture."),
+            DirectorCue("Show scale", "Medium shot with context", "Gentle tilt", "Include a hand or familiar object for scale when useful. Tilt slowly from the context to the key detail.", "Fast tilts and changing exposure.", "Show the context, then tilt slowly to the detail."),
+            DirectorCue("Clean final frame", "Centered hero composition", "Static hold", "Finish with a clean, uncluttered view and keep it still for at least three seconds.", "Moving away before the take finishes.", "Hold a clean final frame for three seconds.")
+        )
+        else -> listOf(
+            DirectorCue("Establish the action", "Wide · eye level", "Slow follow", "Show the location and where the subject is going. Start recording before movement begins.", "Starting too late or cutting off the subject.", "Start wide and show where the subject is going."),
+            DirectorCue("Follow the subject", "Medium tracking shot", "Smooth side tracking", "Keep a safe path, move at a steady pace, and keep the subject in the same area of the frame.", "Walking backwards into obstacles.", "Follow smoothly. Keep a safe path."),
+            DirectorCue("Capture a reaction", "Close-up", "Static hold", "Stop moving and capture the subject's reaction or a meaningful detail for 3 seconds.", "Unnecessary zoom or camera shake.", "Stop moving and hold the close-up."),
+            DirectorCue("End with a reveal", "Wide finishing frame", "Slow pull-back", "Move back slowly if the path is clear, then hold the final frame for two seconds.", "Rushing the final movement.", "Pull back slowly and hold the ending.")
+        )
+    }
+}
+
+@Composable
+private fun FlowChips(options: List<String>, selected: String, onSelect: (String) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        options.chunked(2).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                row.forEach { option ->
+                    FilterChip(selected = selected == option, onClick = { onSelect(option) }, label = { Text(option, fontSize = 10.sp) }, modifier = Modifier.weight(1f))
+                }
+                if (row.size == 1) Spacer(Modifier.weight(1f))
             }
         }
     }
