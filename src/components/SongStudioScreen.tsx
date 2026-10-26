@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { AppScreen, SongTrack, MusicVideoProject, ShootingStyle } from '../types';
 import { SAMPLE_SONGS, analyzeAudioFile } from '../services/audioService';
 import { Music, Upload, Play, Sparkles, ArrowLeft, ChevronRight, Sliders, Clock } from 'lucide-react';
-import { generateAIShotList } from '../services/aiDirectorService';
+import { generateAIShotListLive } from '../services/aiDirectorService';
 
 interface SongStudioScreenProps {
   activeProject: MusicVideoProject;
@@ -19,18 +19,28 @@ export const SongStudioScreen: React.FC<SongStudioScreenProps> = ({
   const [selectedStyle, setSelectedStyle] = useState<ShootingStyle>(activeProject.shootingStyle || 'Hero and attitude');
   const [targetDuration, setTargetDuration] = useState<number>(activeProject.targetDuration || 30);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
+  const [planError, setPlanError] = useState('');
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setIsAnalyzing(true);
-    const analyzed = await analyzeAudioFile(file);
-    setSelectedSong(analyzed);
-    setIsAnalyzing(false);
+    try {
+      const analyzed = await analyzeAudioFile(file);
+      setSelectedSong(analyzed);
+    } catch (error) {
+      setPlanError(error instanceof Error ? error.message : 'Could not analyze this audio file.');
+    } finally {
+      setIsAnalyzing(false);
+    }
   };
 
-  const handleProceedToDirector = () => {
-    const shots = generateAIShotList(selectedSong, selectedStyle, targetDuration);
+  const handleProceedToDirector = async () => {
+    setIsGeneratingPlan(true);
+    setPlanError('');
+    try {
+    const shots = await generateAIShotListLive(selectedSong, selectedStyle, targetDuration);
     onUpdateProject({
       ...activeProject,
       song: selectedSong,
@@ -40,6 +50,11 @@ export const SongStudioScreen: React.FC<SongStudioScreenProps> = ({
       updatedAt: Date.now(),
     });
     onNavigate('shotDirector');
+    } catch (error) {
+      setPlanError(error instanceof Error ? error.message : 'Gemini shot-plan generation failed.');
+    } finally {
+      setIsGeneratingPlan(false);
+    }
   };
 
   return (
@@ -161,13 +176,16 @@ export const SongStudioScreen: React.FC<SongStudioScreenProps> = ({
           </div>
         </div>
 
+        {planError && <div role="alert" className="rounded-xl border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-300">{planError}</div>}
+
         {/* Proceed Button */}
         <button
           onClick={handleProceedToDirector}
+          disabled={isGeneratingPlan || isAnalyzing}
           className="w-full flex items-center justify-center gap-2 py-4 bg-blue-600 hover:bg-blue-500 text-white font-bold text-sm rounded-2xl shadow-xl shadow-blue-600/30 transition-all active:scale-95"
         >
           <Sparkles className="w-4 h-4" />
-          <span>GENERATE AI SHOT PLAN</span>
+          <span>{isGeneratingPlan ? 'GEMINI IS PLANNING…' : isAnalyzing ? 'ANALYZING AUDIO…' : 'GENERATE AI SHOT PLAN'}</span>
         </button>
       </main>
     </div>
