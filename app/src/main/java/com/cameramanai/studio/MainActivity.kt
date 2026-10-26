@@ -9,6 +9,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.FileOutputOptions
@@ -37,6 +38,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -357,119 +360,212 @@ private fun CameraScreen(onBack: () -> Unit, onSaved: (String) -> Unit) {
     val lifecycleOwner = LocalLifecycleOwner.current
     val executor = remember { ContextCompat.getMainExecutor(context) }
     var hasPermissions by remember {
-        mutableStateOf(
-            ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
-        )
+        mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED)
+    }
+    var hasAudioPermission by remember {
+        mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
     }
     var recording by remember { mutableStateOf(false) }
+    var showGrid by remember { mutableStateOf(true) }
     var status by remember { mutableStateOf("Ready to shoot") }
     var videoCapture by remember { mutableStateOf<VideoCapture<Recorder>?>(null) }
     var activeRecording by remember { mutableStateOf<androidx.camera.video.Recording?>(null) }
+    var boundCamera by remember { mutableStateOf<androidx.camera.core.Camera?>(null) }
     var lens by remember { mutableIntStateOf(CameraSelector.LENS_FACING_BACK) }
     var previewView by remember { mutableStateOf<PreviewView?>(null) }
 
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
-        hasPermissions = grants[Manifest.permission.CAMERA] == true
-        if (!hasPermissions) status = "Camera permission is required to record."
+        hasPermissions = grants[Manifest.permission.CAMERA] == true ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+        hasAudioPermission = grants[Manifest.permission.RECORD_AUDIO] == true ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        status = if (hasPermissions) "Camera permission granted · starting preview" else "Camera permission denied. Tap Allow camera to try again."
     }
 
     DisposableEffect(hasPermissions, lens, previewView) {
         if (!hasPermissions || previewView == null) return@DisposableEffect onDispose { }
+        val view = previewView ?: return@DisposableEffect onDispose { }
         val providerFuture = ProcessCameraProvider.getInstance(context)
         val listener = Runnable {
             try {
                 val provider = providerFuture.get()
-                val preview = Preview.Builder().build().also { it.surfaceProvider = previewView!!.surfaceProvider }
-                val recorder = Recorder.Builder().setQualitySelector(QualitySelector.from(Quality.HD)).build()
+                val preview = Preview.Builder().build().also { it.surfaceProvider = view.surfaceProvider }
+                val recorder = Recorder.Builder()
+                    .setQualitySelector(QualitySelector.from(Quality.HD))
+                    .build()
                 val capture = VideoCapture.withOutput(recorder)
                 provider.unbindAll()
-                provider.bindToLifecycle(lifecycleOwner, CameraSelector.Builder().requireLensFacing(lens).build(), preview, capture)
+                boundCamera = provider.bindToLifecycle(
+                    lifecycleOwner,
+                    CameraSelector.Builder().requireLensFacing(lens).build(),
+                    preview,
+                    capture
+                )
                 videoCapture = capture
                 status = "Live camera ready · HD"
             } catch (e: Exception) {
+                videoCapture = null
+                boundCamera = null
                 status = "Camera unavailable: ${e.localizedMessage ?: "check camera access"}"
             }
         }
         providerFuture.addListener(listener, executor)
-        onDispose { try { providerFuture.get().unbindAll() } catch (_: Exception) {} }
+        onDispose {
+            try {
+                if (providerFuture.isDone) providerFuture.get().unbindAll()
+            } catch (_: Exception) { }
+            videoCapture = null
+            boundCamera = null
+        }
     }
 
     Column(Modifier.fillMaxSize().background(Ink).padding(horizontal = 14.dp, vertical = 10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back", tint = Color.White) }
+            IconButton(onClick = onBack, enabled = !recording) { Icon(Icons.Default.ArrowBack, "Back", tint = Color.White) }
             Column(Modifier.weight(1f)) {
                 Text("DIRECTOR CAMERA", color = Violet, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
-                Text(status, color = Muted, fontSize = 11.sp)
+                Text(status, color = Muted, fontSize = 11.sp, maxLines = 2)
             }
-            IconButton(onClick = { if (!recording) lens = if (lens == CameraSelector.LENS_FACING_BACK) CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK }) {
-                Icon(Icons.Default.Cameraswitch, "Switch camera", tint = Color.White)
-            }
+            IconButton(
+                enabled = !recording,
+                onClick = { lens = if (lens == CameraSelector.LENS_FACING_BACK) CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK }
+            ) { Icon(Icons.Default.Cameraswitch, "Switch front/back camera", tint = Color.White) }
         }
-        Box(Modifier.weight(1f).fillMaxWidth().padding(vertical = 10.dp).clip(RoundedCornerShape(24.dp)).background(Color.Black), contentAlignment = Alignment.Center) {
+
+        Box(
+            Modifier.weight(1f).fillMaxWidth().padding(vertical = 10.dp)
+                .clip(RoundedCornerShape(24.dp)).background(Color.Black),
+            contentAlignment = Alignment.Center
+        ) {
             if (hasPermissions) {
                 AndroidView(
-                    factory = { ctx -> PreviewView(ctx).also { it.scaleType = PreviewView.ScaleType.FILL_CENTER; previewView = it } },
+                    factory = { ctx ->
+                        PreviewView(ctx).also {
+                            it.scaleType = PreviewView.ScaleType.FILL_CENTER
+                            it.implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+                            previewView = it
+                        }
+                    },
                     modifier = Modifier.fillMaxSize()
                 )
-                Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.SpaceBetween) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Surface(color = Color.Black.copy(alpha = .55f), shape = CircleShape) { Text("● LIVE", Modifier.padding(horizontal = 12.dp, vertical = 7.dp), color = Color(0xFFFF6B78), fontSize = 10.sp, fontWeight = FontWeight.Bold) }
-                        Surface(color = Color.Black.copy(alpha = .55f), shape = CircleShape) { Text("HD · 30 FPS*", Modifier.padding(horizontal = 12.dp, vertical = 7.dp), color = Color.White, fontSize = 10.sp) }
-                    }
-                    Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(Icons.Default.Add, null, tint = Color.White.copy(alpha = .6f), modifier = Modifier.size(30.dp))
-                            Text("Keep the subject in the center", color = Color.White, fontSize = 11.sp)
+                // Tap anywhere in the preview to focus at that point.
+                Box(
+                    Modifier.fillMaxSize().pointerInput(boundCamera, previewView) {
+                        detectTapGestures { point ->
+                            val view = previewView
+                            val camera = boundCamera
+                            if (view != null && camera != null) {
+                                try {
+                                    val meteringPoint = view.meteringPointFactory.createPoint(point.x, point.y)
+                                    val action = FocusMeteringAction.Builder(meteringPoint)
+                                        .setAutoCancelDuration(3, java.util.concurrent.TimeUnit.SECONDS)
+                                        .build()
+                                    camera.cameraControl.startFocusAndMetering(action)
+                                    status = "Focusing…"
+                                } catch (_: Exception) {
+                                    status = "Tap to focus is unavailable on this camera"
+                                }
+                            }
                         }
                     }
-                    Text("Rule of thirds · Hold steady · Move slowly", color = Color.White, fontSize = 10.sp)
+                ) {
+                    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.SpaceBetween) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Surface(color = Color.Black.copy(alpha = .55f), shape = CircleShape) {
+                                Text(if (recording) "● REC" else "● LIVE", Modifier.padding(horizontal = 12.dp, vertical = 7.dp), color = if (recording) Color(0xFFFF5364) else Color(0xFFFF6B78), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Surface(color = Color.Black.copy(alpha = .55f), shape = CircleShape) {
+                                Text("HD", Modifier.padding(horizontal = 12.dp, vertical = 7.dp), color = Color.White, fontSize = 10.sp)
+                            }
+                        }
+                        Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                            if (showGrid) {
+                                Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceEvenly) {
+                                    repeat(2) { HorizontalGridLine() }
+                                }
+                                Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                                    repeat(2) { VerticalGridLine() }
+                                }
+                            }
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(Icons.Default.Add, null, tint = Color.White.copy(alpha = .72f), modifier = Modifier.size(30.dp))
+                                Text("Tap to focus · Keep your subject centered", color = Color.White, fontSize = 11.sp)
+                            }
+                        }
+                        Text("Rule of thirds · Hold steady · Move slowly", color = Color.White, fontSize = 10.sp)
+                    }
                 }
             } else {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
                     Icon(Icons.Default.NoPhotography, null, tint = Violet, modifier = Modifier.size(48.dp))
                     Spacer(Modifier.height(12.dp))
                     Text("Camera permission needed", color = Color.White, fontWeight = FontWeight.Bold)
-                    Text("Allow camera and microphone access to record clips.", color = Muted, fontSize = 12.sp)
+                    Text("Allow camera access to open the live preview. Microphone is optional for recorded audio.", color = Muted, fontSize = 12.sp)
                     Spacer(Modifier.height(14.dp))
-                    Button(onClick = { permissionLauncher.launch(arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO)) }) { Text("Allow camera") }
+                    Button(onClick = {
+                        permissionLauncher.launch(arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO))
+                    }) { Text("Allow camera") }
                 }
             }
         }
-        Row(Modifier.fillMaxWidth().padding(bottom = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceEvenly) {
+
+        Row(
+            Modifier.fillMaxWidth().padding(bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceEvenly
+        ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(Icons.Default.Grid3x3, null, tint = Muted)
-                Text("Grid", color = Muted, fontSize = 10.sp)
+                IconButton(onClick = { showGrid = !showGrid }) { Icon(Icons.Default.Grid3x3, "Toggle grid", tint = if (showGrid) Cyan else Muted) }
+                Text(if (showGrid) "Grid on" else "Grid off", color = Muted, fontSize = 10.sp)
             }
-            Box(Modifier.size(76.dp).clip(CircleShape).background(if (recording) Color(0xFFFF5364) else Color.White).padding(5.dp), contentAlignment = Alignment.Center) {
+            Box(
+                Modifier.size(76.dp).clip(CircleShape)
+                    .background(if (recording) Color(0xFFFF5364) else Color.White).padding(5.dp),
+                contentAlignment = Alignment.Center
+            ) {
                 IconButton(
                     enabled = hasPermissions && videoCapture != null,
                     onClick = {
                         val capture = videoCapture ?: return@IconButton
                         if (recording) {
-                            activeRecording?.stop()
-                            activeRecording = null
-                            recording = false
                             status = "Finishing clip…"
+                            activeRecording?.stop()
                         } else {
-                            val folder = File(context.getExternalFilesDir(null), "CameramanAI")
-                            folder.mkdirs()
-                            val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-                            val file = File(folder, "CAM_$stamp.mp4")
-                            val options = FileOutputOptions.Builder(file).build()
-                            var pending = capture.output.prepareRecording(context, options)
-                            if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) pending = pending.withAudioEnabled()
-                            activeRecording = pending.start(executor) { event ->
-                                when (event) {
-                                    is VideoRecordEvent.Start -> { recording = true; status = "Recording…"; }
-                                    is VideoRecordEvent.Finalize -> {
-                                        recording = false
-                                        activeRecording = null
-                                        if (!event.hasError()) {
-                                            status = "Clip saved · ${file.name}"
-                                            onSaved(file.absolutePath)
-                                        } else status = "Recording failed: ${event.error}"
+                            try {
+                                val folder = File(context.getExternalFilesDir(null), "CameramanAI")
+                                if (!folder.exists() && !folder.mkdirs()) {
+                                    status = "Could not create clip storage folder"
+                                    return@IconButton
+                                }
+                                val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+                                val file = File(folder, "CAM_$stamp.mp4")
+                                val options = FileOutputOptions.Builder(file).build()
+                                var pending = capture.output.prepareRecording(context, options)
+                                if (hasAudioPermission && ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                                    pending = pending.withAudioEnabled()
+                                }
+                                activeRecording = pending.start(executor) { event ->
+                                    when (event) {
+                                        is VideoRecordEvent.Start -> {
+                                            recording = true
+                                            status = if (hasAudioPermission) "Recording video + audio…" else "Recording video (no audio)…"
+                                        }
+                                        is VideoRecordEvent.Finalize -> {
+                                            recording = false
+                                            activeRecording = null
+                                            if (!event.hasError() && file.exists() && file.length() > 0L) {
+                                                status = "Clip saved · ${file.name}"
+                                                onSaved(file.absolutePath)
+                                            } else {
+                                                status = "Recording failed (code ${event.error}). Please try again."
+                                            }
+                                        }
                                     }
                                 }
+                            } catch (e: Exception) {
+                                recording = false
+                                activeRecording = null
+                                status = "Could not start recording: ${e.localizedMessage ?: "try again"}"
                             }
                         }
                     },
@@ -479,12 +575,25 @@ private fun CameraScreen(onBack: () -> Unit, onSaved: (String) -> Unit) {
                 }
             }
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(Icons.Default.FlipCameraAndroid, null, tint = Muted)
+                IconButton(
+                    enabled = !recording,
+                    onClick = { lens = if (lens == CameraSelector.LENS_FACING_BACK) CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK }
+                ) { Icon(Icons.Default.FlipCameraAndroid, "Flip lens", tint = Muted) }
                 Text("Flip", color = Muted, fontSize = 10.sp)
             }
         }
-        Text("Recorded clips are saved inside app storage on this device.", color = Muted, fontSize = 10.sp, modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 4.dp))
+        Text("Clips are saved in app-private storage on this device.", color = Muted, fontSize = 10.sp, modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 4.dp))
     }
+}
+
+@Composable
+private fun HorizontalGridLine() {
+    Spacer(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = .3f)))
+}
+
+@Composable
+private fun VerticalGridLine() {
+    Spacer(Modifier.fillMaxHeight().width(1.dp).background(Color.White.copy(alpha = .3f)))
 }
 
 @Composable
