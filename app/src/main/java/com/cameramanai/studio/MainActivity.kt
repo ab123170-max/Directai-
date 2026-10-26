@@ -583,6 +583,7 @@ private fun CameraScreen(onBack: () -> Unit, onSaved: (String) -> Unit) {
     var boxRight by remember { mutableFloatStateOf(0.82f) }
     var boxBottom by remember { mutableFloatStateOf(0.82f) }
     var hasTrackedBox by remember { mutableStateOf(false) }
+    var compositionMode by remember { mutableStateOf("Rule of thirds") }
     var movement by remember { mutableStateOf("Push in") }
     var steadiness by remember { mutableFloatStateOf(0f) }
     var movementStatus by remember { mutableStateOf("Hold phone still to calibrate") }
@@ -777,6 +778,33 @@ private fun CameraScreen(onBack: () -> Unit, onSaved: (String) -> Unit) {
                     },
                     modifier = Modifier.fillMaxSize()
                 )
+                // Module 6: composition overlay. The guide is an approximate viewfinder guide;
+                // detector coordinates can differ slightly because PreviewView crops to fill.
+                Canvas(Modifier.fillMaxSize()) {
+                    val w = size.width
+                    val h = size.height
+                    val stroke = Stroke(width = 1.dp.toPx())
+                    when (compositionMode) {
+                        "Rule of thirds" -> {
+                            drawLine(Color.White.copy(alpha = .65f), androidx.compose.ui.geometry.Offset(w / 3f, 0f), androidx.compose.ui.geometry.Offset(w / 3f, h), stroke.width)
+                            drawLine(Color.White.copy(alpha = .65f), androidx.compose.ui.geometry.Offset(2f * w / 3f, 0f), androidx.compose.ui.geometry.Offset(2f * w / 3f, h), stroke.width)
+                            drawLine(Color.White.copy(alpha = .65f), androidx.compose.ui.geometry.Offset(0f, h / 3f), androidx.compose.ui.geometry.Offset(w, h / 3f), stroke.width)
+                            drawLine(Color.White.copy(alpha = .65f), androidx.compose.ui.geometry.Offset(0f, 2f * h / 3f), androidx.compose.ui.geometry.Offset(w, 2f * h / 3f), stroke.width)
+                        }
+                        "Center" -> {
+                            drawLine(Color.White.copy(alpha = .55f), androidx.compose.ui.geometry.Offset(w / 2f, 0f), androidx.compose.ui.geometry.Offset(w / 2f, h), stroke.width)
+                            drawLine(Color.White.copy(alpha = .55f), androidx.compose.ui.geometry.Offset(0f, h / 2f), androidx.compose.ui.geometry.Offset(w, h / 2f), stroke.width)
+                        }
+                        "Golden-style" -> {
+                            val x = w * 0.382f
+                            val y = h * 0.382f
+                            drawLine(Color.White.copy(alpha = .55f), androidx.compose.ui.geometry.Offset(x, 0f), androidx.compose.ui.geometry.Offset(x, h), stroke.width)
+                            drawLine(Color.White.copy(alpha = .55f), androidx.compose.ui.geometry.Offset(w - x, 0f), androidx.compose.ui.geometry.Offset(w - x, h), stroke.width)
+                            drawLine(Color.White.copy(alpha = .55f), androidx.compose.ui.geometry.Offset(0f, y), androidx.compose.ui.geometry.Offset(w, y), stroke.width)
+                            drawLine(Color.White.copy(alpha = .55f), androidx.compose.ui.geometry.Offset(0f, h - y), androidx.compose.ui.geometry.Offset(w, h - y), stroke.width)
+                        }
+                    }
+                }
                 if (hasTrackedBox) {
                     Canvas(Modifier.fillMaxSize()) {
                         val left = boxLeft * size.width
@@ -872,6 +900,41 @@ private fun CameraScreen(onBack: () -> Unit, onSaved: (String) -> Unit) {
                         permissionLauncher.launch(arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO))
                     }) { Text("Allow camera") }
                 }
+            }
+        }
+
+        Card(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+            colors = CardDefaults.cardColors(containerColor = Panel),
+            shape = RoundedCornerShape(18.dp)
+        ) {
+            Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.CenterFocusStrong, null, tint = Violet, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(7.dp))
+                    Text("MODULE 6 · COMPOSITION COACH", color = Violet, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf("Rule of thirds", "Center", "Golden-style").forEach { mode ->
+                        FilterChip(selected = compositionMode == mode, onClick = { compositionMode = mode }, label = { Text(mode, fontSize = 9.sp) })
+                    }
+                }
+                val targetX = if (compositionMode == "Center") 0.5f else 0.333f
+                val targetY = 0.333f
+                val subjectX = (boxLeft + boxRight) / 2f
+                val subjectY = (boxTop + boxBottom) / 2f
+                val advice = when {
+                    !hasTrackedBox -> "Waiting for a subject: use the grid to compose your shot manually."
+                    kotlin.math.abs(subjectX - targetX) < 0.12f && kotlin.math.abs(subjectY - targetY) < 0.15f -> "Good placement. Keep the subject steady and protect space around it."
+                    subjectX < 0.28f -> "Subject is near the left edge. Leave breathing room before recording."
+                    subjectX > 0.72f -> "Subject is near the right edge. Check headroom and movement space."
+                    subjectY < 0.22f -> "Subject is close to the top. Check headroom so it is not cramped."
+                    subjectY > 0.78f -> "Subject is low in frame. Reframe or choose a deliberate low composition."
+                    else -> "Try placing the subject near a grid intersection for a more intentional frame."
+                }
+                Text(if (hasTrackedBox) "LIVE COMPOSITION · subject detected" else "COMPOSITION GUIDE · manual framing", color = Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                Text(advice, color = Color.White, fontSize = 12.sp, lineHeight = 17.sp)
+                Text("Tip: for landscapes, keep the horizon on the upper or lower third. For centered symmetry, choose Center.", color = Muted, fontSize = 10.sp, lineHeight = 14.sp)
             }
         }
 
