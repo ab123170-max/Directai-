@@ -79,3 +79,68 @@ export function generateAIShotList(
     };
   });
 }
+
+
+// Calls the server-side Gemini endpoint. The API key must never be placed in browser code.
+export async function generateAIShotListLive(
+  song: SongTrack,
+  style: ShootingStyle,
+  targetDuration: number
+): Promise<MusicVideoShot[]> {
+  const response = await fetch('/api/ai/generate-shotlist', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      title: song.title + ' — ' + style,
+      category: style,
+      description: 'Create a music-video shot sequence for ' + targetDuration +
+        ' seconds. Song BPM: ' + song.bpm +
+        '. Beat timestamps in seconds: ' + song.beatMarkers.map(b => b.timestamp.toFixed(2)).join(', ') +
+        '. Match cuts and movement accents to beats. Return a practical sequence for a solo phone creator.',
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload.success !== true || !Array.isArray(payload.shots) || payload.shots.length === 0) {
+    throw new Error(payload.error || 'Gemini could not generate the shot plan. Check API configuration and try again.');
+  }
+
+  const total = Math.max(1, targetDuration);
+  const raw = payload.shots as Array<{shotNumber?:number; name?:string; type?:string; purpose?:string; angle?:string; movement?:string; duration?:number; subject?:string}>;
+  const weights = raw.map(s => Math.max(1, Number(s.duration) || 4));
+  const weightTotal = weights.reduce((sum, value) => sum + value, 0);
+  let cursor = 0;
+  return raw.map((item, index) => {
+    const startTime = Number(cursor.toFixed(2));
+    const duration = index === raw.length - 1
+      ? Number((total - cursor).toFixed(2))
+      : Number((total * weights[index] / weightTotal).toFixed(2));
+    cursor += duration;
+    const movementMap: Record<string, any> = {
+      'static': 'Hold steady', 'pan-left': 'Pan left', 'pan-right': 'Pan right',
+      'tilt-up': 'Tilt upward', 'tilt-down': 'Tilt downward', 'push-in': 'Move closer',
+      'pull-back': 'Move backward', 'orbit': 'Move around subject', 'track': 'Move closer',
+      'reveal': 'Pan right',
+    };
+    const normalizedMovement = (item.movement || '').toLowerCase().replace(/_/g, '-');
+    const beat = song.beatMarkers.reduce((best, marker) =>
+      Math.abs(marker.timestamp - startTime) < Math.abs(best.timestamp - startTime) ? marker : best,
+      song.beatMarkers[0] || { id: '', timestamp: startTime, intensity: 0, isBeatDrop: false });
+    return {
+      id: 'gemini-shot-' + Date.now() + '-' + index,
+      shotNumber: index + 1,
+      name: item.name || ('Cinematic Shot ' + (index + 1)),
+      startTime,
+      endTime: Number((startTime + duration).toFixed(2)),
+      duration,
+      cameraAngle: item.angle || 'Eye-level',
+      cameraMovement: movementMap[normalizedMovement] || 'Hold steady',
+      subjectAction: item.subject || item.purpose || 'Follow the shot direction and perform a natural action.',
+      framingInstructions: item.purpose || ('Frame the subject clearly for a ' + (item.type || 'cinematic') + ' shot.'),
+      suggestedFps: /slow|detail|close/i.test((item.type || '') + ' ' + (item.name || '')) ? 60 : 30,
+      transitionNext: index === raw.length - 1 ? 'Fade out' : (beat.isBeatDrop ? 'Hard cut' : 'Cut on beat'),
+      beatMarkerId: beat.id,
+      status: index === 0 ? 'READY_TO_RECORD' : 'WAITING',
+      takes: [],
+    } as MusicVideoShot;
+  });
+}
