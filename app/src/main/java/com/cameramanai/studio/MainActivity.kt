@@ -129,6 +129,7 @@ private fun CameramanApp() {
     var completed by remember { mutableStateOf(setOf<Int>()) }
     var notice by remember { mutableStateOf("") }
     var recordedClips by remember { mutableStateOf(listOf<RecordedClip>()) }
+    var projectBpm by remember { mutableIntStateOf(0) }
 
     MaterialTheme(
         colorScheme = darkColorScheme(
@@ -203,7 +204,8 @@ private fun CameramanApp() {
                             style = style,
                             onStyleChange = { style = it; shots = makeShots(it, duration); completed = emptySet() },
                             onOpenCamera = { tab = StudioTab.Camera },
-                            onOpenPlan = { tab = StudioTab.Plan }
+                            onOpenPlan = { tab = StudioTab.Plan },
+                            onBpmDetected = { projectBpm = it }
                         )
                         StudioTab.Camera -> CameraScreen(
                             activeShot = shots.firstOrNull { it.id !in completed },
@@ -220,6 +222,15 @@ private fun CameramanApp() {
                             totalCount = shots.size,
                             notice = notice,
                             clips = recordedClips,
+                            projectBpm = projectBpm,
+                            onReorderClips = { from, to ->
+                                val mutable = recordedClips.toMutableList()
+                                if (from in mutable.indices && to in mutable.indices) {
+                                    val clip = mutable.removeAt(from)
+                                    mutable.add(to, clip)
+                                    recordedClips = mutable
+                                }
+                            },
                             onRetake = { clip ->
                                 clip.shotId?.let { id -> completed = completed - id }
                                 tab = StudioTab.Camera
@@ -465,7 +476,8 @@ private fun DirectorScreen(
     style: String,
     onStyleChange: (String) -> Unit,
     onOpenCamera: () -> Unit,
-    onOpenPlan: () -> Unit
+    onOpenPlan: () -> Unit,
+    onBpmDetected: (Int) -> Unit
 ) {
     val context = LocalContext.current
     val ttsRef = remember { arrayOfNulls<TextToSpeech>(1) }
@@ -486,6 +498,7 @@ private fun DirectorScreen(
     var musicDurationMs by remember { mutableLongStateOf(0L) }
     var tapTimes by remember { mutableStateOf(listOf<Long>()) }
     var detectedBpm by remember { mutableIntStateOf(0) }
+    var viralStyle by remember { mutableStateOf("Cinematic travel") }
     var beatStatus by remember { mutableStateOf("Select a song, then tap along with its beat 8 times.") }
     val musicPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
@@ -506,6 +519,7 @@ private fun DirectorScreen(
             }
             tapTimes = emptyList()
             detectedBpm = 0
+            onBpmDetected(0)
         }
     }
     val cues = remember(scene, subject, mood) { makeDirectorCues(scene, subject, mood) }
@@ -602,6 +616,7 @@ private fun DirectorScreen(
                                         val sorted = intervals.sorted()
                                         val median = sorted[sorted.size / 2]
                                         detectedBpm = (60000.0 / median).toInt().coerceIn(30, 240)
+                                        onBpmDetected(detectedBpm)
                                         beatStatus = "Estimated from your taps · tap Reset if you lose the beat"
                                     } else {
                                         detectedBpm = 0
@@ -630,7 +645,7 @@ private fun DirectorScreen(
                         }
                     }
                     Text(beatStatus, color = Muted, fontSize = 10.sp, lineHeight = 15.sp)
-                    OutlinedButton(onClick = { tapTimes = emptyList(); detectedBpm = 0; beatStatus = "Tap along with the song 8 times to estimate tempo" }, modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(onClick = { tapTimes = emptyList(); detectedBpm = 0; onBpmDetected(0); beatStatus = "Tap along with the song 8 times to estimate tempo" }, modifier = Modifier.fillMaxWidth()) {
                         Icon(Icons.Default.Refresh, null); Spacer(Modifier.width(6.dp)); Text("Reset tempo")
                     }
                     Text("This version reads basic audio metadata and estimates BPM from manual beat taps. It does not yet automatically detect beats from the song or add the track to the video timeline.", color = Muted, fontSize = 10.sp, lineHeight = 15.sp)
@@ -661,8 +676,37 @@ private fun DirectorScreen(
                 Icon(Icons.Default.Movie, null); Spacer(Modifier.width(8.dp)); Text("View full shot list")
             }
         }
-        item { Text("This first version uses scene-based coaching rules on the phone. Live scene recognition and Gemini-powered custom direction are not connected yet.", color = Muted, fontSize = 10.sp, lineHeight = 16.sp) }
+        item {
+            Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF2B1B32)), shape = RoundedCornerShape(22.dp)) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                    Text("MODULE 14 · VIRAL STYLE ANALYZER", color = Violet, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
+                    Text("Choose a short-form pattern", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    FlowChips(listOf("Cinematic travel", "Dance hook", "Story reveal", "Product showcase", "Portrait montage", "Fast-cut vlog"), viralStyle) { viralStyle = it }
+                    val advice = when (viralStyle) {
+                        "Dance hook" -> "Lead with the strongest move, establish the full body, add a detail cut, then return to the signature move."
+                        "Story reveal" -> "Start with a question, add context shots, reveal the subject, and finish on a reaction."
+                        "Product showcase" -> "Show the whole item, then texture, use/context, and a clean final hero frame."
+                        "Portrait montage" -> "Mix a medium portrait, close-up expression, walking cutaway, and final held portrait."
+                        "Fast-cut vlog" -> "Use a clear hook, three action/detail cutaways, and a concise ending."
+                        else -> "Reveal the location wide, add foreground depth and detail, then finish with a strong wide frame."
+                    }
+                    Text(advice, color = Color.White, fontSize = 12.sp, lineHeight = 18.sp)
+                    Text("Pattern guide only; no live trend scraping or guarantee of virality.", color = Muted, fontSize = 10.sp)
+                }
+            }
+        }
+        item { Text("Scene direction and style advice use on-device rules. This is not a generative AI analysis of current social trends.", color = Muted, fontSize = 10.sp, lineHeight = 16.sp) }
     }
+}
+
+private fun shotsForBeat(bpm: Int): List<String> {
+    val beat = 60.0 / bpm.coerceIn(30, 240)
+    val bar = beat * 4.0
+    return listOf(
+        "Opening hook — ${"%.2f".format(Locale.US, beat)}s per beat",
+        "Detail cutaway — ${"%.2f".format(Locale.US, bar)}s per 4 beats",
+        "Hero moment — hold ${"%.2f".format(Locale.US, bar * 2)}s for 8 beats"
+    )
 }
 
 private fun formatDuration(milliseconds: Long): String {
@@ -1363,10 +1407,19 @@ private fun EditScreen(
     totalCount: Int,
     notice: String,
     clips: List<RecordedClip>,
+    projectBpm: Int,
+    onReorderClips: (Int, Int) -> Unit,
     onRetake: (RecordedClip) -> Unit,
     onCamera: () -> Unit,
     onPlan: () -> Unit
 ) {
+    var transitionStyle by remember { mutableStateOf("Crossfade") }
+    var selectedQualityChecks by remember { mutableStateOf(setOf<String>()) }
+    var trimStartSeconds by remember { mutableStateOf("0") }
+    var trimEndSeconds by remember { mutableStateOf("10") }
+    var splitAtSeconds by remember { mutableStateOf("5") }
+    var editNotice by remember { mutableStateOf("These edit controls prepare edit points; final video rendering is not connected yet.") }
+
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(15.dp)) {
         item { StudioHeader("Module 09 · Review", "Clip review & retake", "Watch the footage you recorded, check each take, and return to the same planned shot when it needs another take.") }
         item {
@@ -1382,6 +1435,64 @@ private fun EditScreen(
         }
         item { ToolCard(Icons.Default.Videocam, "Record another clip", "Open the CameraX recording screen", "SHOOT", onCamera) }
         item { ToolCard(Icons.Default.Movie, "Review shot sequence", "Check the planned shot list", "PLAN", onPlan) }
+        item {
+            Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF142A31)), shape = RoundedCornerShape(20.dp)) {
+                Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("MODULE 13 · BEAT-SYNCED SHOT PLANNER", color = Cyan, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
+                    Text(if (projectBpm > 0) "Tempo: $projectBpm BPM" else "No BPM detected yet", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                    val beatMs = if (projectBpm > 0) 60000L / projectBpm else 0L
+                    Text(if (projectBpm > 0) "Quick cut: ${beatMs}ms; cinematic cut: ${beatMs * 4}ms (4 beats)." else "Set tempo in Director → Music & Beat Analyzer to get cut timing suggestions.", color = Muted, fontSize = 11.sp, lineHeight = 16.sp)
+                    if (projectBpm > 0) shotsForBeat(projectBpm).forEachIndexed { i, line -> Text("${i + 1}. $line", color = Color.White, fontSize = 11.sp) }
+                }
+            }
+        }
+        item {
+            Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF2B1B32)), shape = RoundedCornerShape(20.dp)) {
+                Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    Text("MODULE 16 · SHOT QUALITY CHECKER", color = Violet, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
+                    Text("Check the take before editing", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    listOf("Focus looks sharp", "Exposure looks balanced", "Subject is framed well", "Camera movement is smooth", "Audio is clear").forEach { check ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(checked = check in selectedQualityChecks, onCheckedChange = { yes -> selectedQualityChecks = if (yes) selectedQualityChecks + check else selectedQualityChecks - check })
+                            Text(check, color = Color.White, fontSize = 12.sp)
+                        }
+                    }
+                    Text("${selectedQualityChecks.size}/5 checks passed · Manual review only; automatic quality scoring is not implemented.", color = Muted, fontSize = 10.sp)
+                }
+            }
+        }
+        item {
+            Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(20.dp)) {
+                Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("MODULE 18 · TIMELINE EDITOR", color = Cyan, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
+                    Text("Use Up/Down on each clip below to arrange the sequence.", color = Muted, fontSize = 11.sp)
+                    Text("MODULE 19 · TRIM & SPLIT", color = Violet, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(value = trimStartSeconds, onValueChange = { trimStartSeconds = it.filter(Char::isDigit).take(5) }, modifier = Modifier.weight(1f), label = { Text("Start (s)") }, singleLine = true)
+                        OutlinedTextField(value = trimEndSeconds, onValueChange = { trimEndSeconds = it.filter(Char::isDigit).take(5) }, modifier = Modifier.weight(1f), label = { Text("End (s)") }, singleLine = true)
+                    }
+                    OutlinedTextField(value = splitAtSeconds, onValueChange = { splitAtSeconds = it.filter(Char::isDigit).take(5) }, modifier = Modifier.fillMaxWidth(), label = { Text("Split marker (s)") }, singleLine = true)
+                    Button(onClick = {
+                        val start = trimStartSeconds.toLongOrNull()
+                        val end = trimEndSeconds.toLongOrNull()
+                        val split = splitAtSeconds.toLongOrNull()
+                        editNotice = when {
+                            start == null || end == null || split == null -> "Enter valid whole-number seconds."
+                            start >= end -> "End must be greater than start."
+                            split <= start || split >= end -> "Split marker must be between start and end."
+                            else -> "Edit plan: keep $start–$end seconds; split at $split seconds. Export rendering is required to alter the file."
+                        }
+                    }, modifier = Modifier.fillMaxWidth()) { Text("Validate edit points") }
+                    Text(editNotice, color = Muted, fontSize = 10.sp, lineHeight = 15.sp)
+                    Text("MODULE 20 · TRANSITIONS ENGINE", color = Violet, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
+                    FlowChips(listOf("Cut", "Crossfade", "Fade to black", "Dissolve", "Whip-pan"), transitionStyle) {
+                        transitionStyle = it
+                        editNotice = "Transition selected: $it. This is a setting preview; rendered transitions are not wired yet."
+                    }
+                    Text("Selected transition: $transitionStyle", color = Cyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.PlayCircle, null, tint = Cyan, modifier = Modifier.size(21.dp))
@@ -1424,6 +1535,11 @@ private fun EditScreen(
                                     }
                                 }
                             )
+                        }
+                        val clipIndex = clips.indexOf(clip)
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedButton(onClick = { onReorderClips(clipIndex, clipIndex - 1) }, enabled = clipIndex > 0, modifier = Modifier.weight(1f)) { Icon(Icons.Default.KeyboardArrowUp, null); Text("Up") }
+                            OutlinedButton(onClick = { onReorderClips(clipIndex, clipIndex + 1) }, enabled = clipIndex < clips.lastIndex, modifier = Modifier.weight(1f)) { Icon(Icons.Default.KeyboardArrowDown, null); Text("Down") }
                         }
                         Button(onClick = { onRetake(clip) }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Violet, contentColor = Ink)) {
                             Icon(Icons.Default.Replay, null); Spacer(Modifier.width(6.dp)); Text("Retake this shot")
