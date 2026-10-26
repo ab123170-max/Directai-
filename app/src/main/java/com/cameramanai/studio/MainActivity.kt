@@ -949,6 +949,43 @@ private fun CameraScreen(activeShot: Shot?, onShotCaptured: (Int) -> Unit, onBac
 
         Card(
             modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF202034)),
+            shape = RoundedCornerShape(18.dp)
+        ) {
+            Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Checklist, null, tint = Cyan, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(7.dp))
+                    Text("MODULE 8 · SMART CAPTURE CHECKLIST", color = Cyan, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
+                }
+                Text(activeShot?.let { "NEXT SHOT: ${it.title} · ${it.angle}" } ?: "All planned shots are marked complete", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Text(activeShot?.let { "Move: ${it.movement} · ${it.duration}s target" } ?: "Return to the shot planner to start another sequence.", color = Muted, fontSize = 10.sp)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = checkedFocus, onCheckedChange = { checkedFocus = it })
+                    Text("Focus", color = Color.White, fontSize = 11.sp)
+                    Spacer(Modifier.width(6.dp))
+                    Checkbox(checked = checkedExposure, onCheckedChange = { checkedExposure = it })
+                    Text("Light", color = Color.White, fontSize = 11.sp)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = checkedBackground, onCheckedChange = { checkedBackground = it })
+                    Text("Background", color = Color.White, fontSize = 11.sp)
+                    Spacer(Modifier.width(6.dp))
+                    Checkbox(checked = checkedStability, onCheckedChange = { checkedStability = it })
+                    Text("Stable", color = Color.White, fontSize = 11.sp)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Surface(color = if (preflightReady) Color(0xFF123C35) else Color(0xFF3A2D24), shape = RoundedCornerShape(9.dp)) {
+                        Text(if (preflightReady) "READY TO RECORD" else "CHECK ${listOf(checkedFocus, checkedExposure, checkedBackground, checkedStability).count { it }}/4 BEFORE RECORDING", Modifier.padding(horizontal = 10.dp, vertical = 7.dp), color = if (preflightReady) Cyan else Color(0xFFFFD166), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Text("Saved clip marks this shot done", color = Muted, fontSize = 9.sp)
+                }
+            }
+        }
+
+        Card(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
             colors = CardDefaults.cardColors(containerColor = Panel),
             shape = RoundedCornerShape(18.dp)
         ) {
