@@ -9,6 +9,7 @@ import { SAMPLE_SONGS } from './services/audioService';
 import { generateAIShotList } from './services/aiDirectorService';
 
 import { AndroidSplashScreen } from './components/AndroidSplashScreen';
+import { TikTokFeedScreen } from './components/TikTokFeedScreen';
 import { AndroidHomeDashboard } from './components/AndroidHomeDashboard';
 import { SongStudioScreen } from './components/SongStudioScreen';
 import { ShotDirectorScreen } from './components/ShotDirectorScreen';
@@ -82,10 +83,8 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#121212] text-zinc-100 font-['Plus_Jakarta_Sans',sans-serif] selection:bg-blue-600 selection:text-white">
-      {currentScreen === 'splash' && (
-        <AndroidSplashScreen onNavigate={setCurrentScreen} />
-      )}
-
+      {currentScreen === 'splash' && <AndroidSplashScreen onNavigate={setCurrentScreen} />}
+      {currentScreen === 'feed' && <TikTokFeedScreen onNavigate={setCurrentScreen} />}
       {currentScreen === 'home' && (
         <AndroidHomeDashboard
           projects={projects}
@@ -98,42 +97,19 @@ export default function App() {
           onNavigate={setCurrentScreen}
         />
       )}
-
       {currentScreen === 'songStudio' && (
-        <SongStudioScreen
-          activeProject={activeProject}
-          onUpdateProject={handleUpdateProject}
-          onNavigate={setCurrentScreen}
-        />
+        <SongStudioScreen activeProject={activeProject} onUpdateProject={handleUpdateProject} onNavigate={setCurrentScreen} />
       )}
-
       {currentScreen === 'shotDirector' && (
-        <ShotDirectorScreen
-          activeProject={activeProject}
-          onUpdateProject={handleUpdateProject}
-          onNavigate={setCurrentScreen}
-        />
+        <ShotDirectorScreen activeProject={activeProject} onUpdateProject={handleUpdateProject} onNavigate={setCurrentScreen} />
       )}
-
       {currentScreen === 'camera' && (
-        <NativeCameraScreen
-          activeProject={activeProject}
-          onUpdateProject={handleUpdateProject}
-          onNavigate={setCurrentScreen}
-        />
+        <NativeCameraScreen activeProject={activeProject} onUpdateProject={handleUpdateProject} onNavigate={setCurrentScreen} />
       )}
-
       {currentScreen === 'editing' && (
-        <VideoEditingStudioScreen
-          activeProject={activeProject}
-          onUpdateProject={handleUpdateProject}
-          onNavigate={setCurrentScreen}
-        />
+        <VideoEditingStudioScreen activeProject={activeProject} onUpdateProject={handleUpdateProject} onNavigate={setCurrentScreen} />
       )}
-
-      {currentScreen === 'settings' && (
-        <SettingsScreen onNavigate={setCurrentScreen} />
-      )}
+      {currentScreen === 'settings' && <SettingsScreen onNavigate={setCurrentScreen} />}
     </div>
   );
 }
