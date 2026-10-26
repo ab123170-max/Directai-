@@ -24,6 +24,7 @@ import androidx.camera.video.VideoRecordEvent
 import androidx.camera.view.PreviewView
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -39,6 +40,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.input.pointer.pointerInput
@@ -571,6 +573,11 @@ private fun CameraScreen(onBack: () -> Unit, onSaved: (String) -> Unit) {
     var liveScene by remember { mutableStateOf("Waiting for camera frames…") }
     var liveObject by remember { mutableStateOf("No subject detected yet") }
     var liveConfidence by remember { mutableStateOf(0f) }
+    var boxLeft by remember { mutableFloatStateOf(0.18f) }
+    var boxTop by remember { mutableFloatStateOf(0.18f) }
+    var boxRight by remember { mutableFloatStateOf(0.82f) }
+    var boxBottom by remember { mutableFloatStateOf(0.82f) }
+    var hasTrackedBox by remember { mutableStateOf(false) }
     var analyzerEnabled by remember { mutableStateOf(true) }
     val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
     val lastAnalysisAt = remember { longArrayOf(0L) }
@@ -644,14 +651,32 @@ private fun CameraScreen(onBack: () -> Unit, onSaved: (String) -> Unit) {
                                             if (target != null) {
                                                 val label = target.labels.firstOrNull()?.text ?: "Subject"
                                                 val confidence = target.labels.firstOrNull()?.confidence ?: 0f
+                                                val bounds = target.boundingBox
+                                                val imageWidth = proxy.width.toFloat().coerceAtLeast(1f)
+                                                val imageHeight = proxy.height.toFloat().coerceAtLeast(1f)
+                                                var left = (bounds.left / imageWidth).coerceIn(0f, 1f)
+                                                var top = (bounds.top / imageHeight).coerceIn(0f, 1f)
+                                                var right = (bounds.right / imageWidth).coerceIn(0f, 1f)
+                                                var bottom = (bounds.bottom / imageHeight).coerceIn(0f, 1f)
+                                                when (proxy.imageInfo.rotationDegrees) {
+                                                    90 -> { val l = left; val t = top; val r = right; val b = bottom; left = 1f-b; top = l; right = 1f-t; bottom = r }
+                                                    180 -> { val l = left; val t = top; val r = right; val b = bottom; left = 1f-r; top = 1f-b; right = 1f-l; bottom = 1f-t }
+                                                    270 -> { val l = left; val t = top; val r = right; val b = bottom; left = t; top = 1f-r; right = b; bottom = 1f-l }
+                                                }
                                                 executor.execute {
-                                                    liveObject = "Tracked subject: $label"
+                                                    liveObject = "Detected subject: $label"
                                                     liveConfidence = confidence
+                                                    boxLeft = left
+                                                    boxTop = top
+                                                    boxRight = right
+                                                    boxBottom = bottom
+                                                    hasTrackedBox = true
                                                 }
                                             } else {
                                                 executor.execute {
                                                     liveObject = "Searching for a clear subject…"
                                                     liveConfidence = 0f
+                                                    hasTrackedBox = false
                                                 }
                                             }
                                         }
@@ -723,6 +748,30 @@ private fun CameraScreen(onBack: () -> Unit, onSaved: (String) -> Unit) {
                     },
                     modifier = Modifier.fillMaxSize()
                 )
+                if (hasTrackedBox) {
+                    Canvas(Modifier.fillMaxSize()) {
+                        val left = boxLeft * size.width
+                        val top = boxTop * size.height
+                        val right = boxRight * size.width
+                        val bottom = boxBottom * size.height
+                        drawRect(
+                            color = Cyan,
+                            topLeft = androidx.compose.ui.geometry.Offset(left, top),
+                            size = androidx.compose.ui.geometry.Size((right - left).coerceAtLeast(1f), (bottom - top).coerceAtLeast(1f)),
+                            style = Stroke(width = 3.dp.toPx())
+                        )
+                        val c = 18.dp.toPx()
+                        val w = 5.dp.toPx()
+                        drawLine(Cyan, androidx.compose.ui.geometry.Offset(left, top), androidx.compose.ui.geometry.Offset(left + c, top), w)
+                        drawLine(Cyan, androidx.compose.ui.geometry.Offset(left, top), androidx.compose.ui.geometry.Offset(left, top + c), w)
+                        drawLine(Cyan, androidx.compose.ui.geometry.Offset(right, top), androidx.compose.ui.geometry.Offset(right - c, top), w)
+                        drawLine(Cyan, androidx.compose.ui.geometry.Offset(right, top), androidx.compose.ui.geometry.Offset(right, top + c), w)
+                        drawLine(Cyan, androidx.compose.ui.geometry.Offset(left, bottom), androidx.compose.ui.geometry.Offset(left + c, bottom), w)
+                        drawLine(Cyan, androidx.compose.ui.geometry.Offset(left, bottom), androidx.compose.ui.geometry.Offset(left, bottom - c), w)
+                        drawLine(Cyan, androidx.compose.ui.geometry.Offset(right, bottom), androidx.compose.ui.geometry.Offset(right - c, bottom), w)
+                        drawLine(Cyan, androidx.compose.ui.geometry.Offset(right, bottom), androidx.compose.ui.geometry.Offset(right, bottom - c), w)
+                    }
+                }
                 // Tap anywhere in the preview to focus at that point.
                 Box(
                     Modifier.fillMaxSize().pointerInput(boundCamera, previewView) {
@@ -759,6 +808,7 @@ private fun CameraScreen(onBack: () -> Unit, onSaved: (String) -> Unit) {
                                     Text("LIVE SCENE ANALYSIS", color = Cyan, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.sp)
                                     Text(liveScene, color = Color.White, fontSize = 11.sp, maxLines = 2)
                                     Text(liveObject, color = Violet, fontSize = 11.sp, maxLines = 1)
+                                    Text(if (hasTrackedBox) "TRACKING BOX ACTIVE · keep subject in frame" else "TRACKING · searching for subject", color = if (hasTrackedBox) Cyan else Muted, fontSize = 9.sp, maxLines = 1)
                                     if (liveConfidence > 0f) {
                                         Text("Subject confidence: ${(liveConfidence * 100).toInt()}%", color = Muted, fontSize = 9.sp)
                                     }
