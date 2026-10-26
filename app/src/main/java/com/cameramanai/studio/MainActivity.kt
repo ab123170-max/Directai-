@@ -7,7 +7,6 @@ import android.net.Uri
 import android.media.MediaMetadataRetriever
 import android.os.Bundle
 import android.os.SystemClock
-import android.content.Context
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
