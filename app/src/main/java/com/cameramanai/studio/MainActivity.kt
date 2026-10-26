@@ -11,6 +11,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.FocusMeteringAction
+import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.FileOutputOptions
@@ -52,6 +54,12 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.Executor
+import java.util.concurrent.Executors
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.label.ImageLabeling
+import com.google.mlkit.vision.label.defaults.ImageLabelerOptions
+import com.google.mlkit.vision.objects.ObjectDetection
+import com.google.mlkit.vision.objects.defaults.ObjectDetectorOptions
 
 private val Ink = Color(0xFF0B0B12)
 private val Panel = Color(0xFF171722)
@@ -560,6 +568,28 @@ private fun CameraScreen(onBack: () -> Unit, onSaved: (String) -> Unit) {
     var boundCamera by remember { mutableStateOf<androidx.camera.core.Camera?>(null) }
     var lens by remember { mutableIntStateOf(CameraSelector.LENS_FACING_BACK) }
     var previewView by remember { mutableStateOf<PreviewView?>(null) }
+    var liveScene by remember { mutableStateOf("Waiting for camera frames…") }
+    var liveObject by remember { mutableStateOf("No subject detected yet") }
+    var liveConfidence by remember { mutableStateOf(0f) }
+    var analyzerEnabled by remember { mutableStateOf(true) }
+    val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
+    val lastAnalysisAt = remember { longArrayOf(0L) }
+    val imageLabeler = remember { ImageLabeling.getClient(ImageLabelerOptions.DEFAULT_OPTIONS) }
+    val objectDetector = remember {
+        ObjectDetection.getClient(
+            ObjectDetectorOptions.Builder()
+                .setDetectorMode(ObjectDetectorOptions.STREAM_MODE)
+                .enableClassification()
+                .build()
+        )
+    }
+    DisposableEffect(Unit) {
+        onDispose {
+            analysisExecutor.shutdown()
+            imageLabeler.close()
+            objectDetector.close()
+        }
+    }
 
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
         hasPermissions = grants[Manifest.permission.CAMERA] == true ||
@@ -581,12 +611,70 @@ private fun CameraScreen(onBack: () -> Unit, onSaved: (String) -> Unit) {
                     .setQualitySelector(QualitySelector.from(Quality.HD))
                     .build()
                 val capture = VideoCapture.withOutput(recorder)
+                val analysis = ImageAnalysis.Builder()
+                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                    .build()
+                analysis.setAnalyzer(analysisExecutor) { proxy ->
+                    val now = System.currentTimeMillis()
+                    if (!analyzerEnabled || now - lastAnalysisAt[0] < 650L) {
+                        proxy.close()
+                    } else {
+                        lastAnalysisAt[0] = now
+                        val mediaImage = proxy.image
+                        if (mediaImage == null) {
+                            proxy.close()
+                        } else {
+                            val input = InputImage.fromMediaImage(mediaImage, proxy.imageInfo.rotationDegrees)
+                            imageLabeler.process(input)
+                                .addOnSuccessListener { labels ->
+                                    val best = labels.maxByOrNull { it.confidence }
+                                    if (best != null && best.confidence >= 0.45f) {
+                                        val name = best.text
+                                        val confidence = (best.confidence * 100).toInt()
+                                        executor.execute {
+                                            liveScene = "Scene cue: $name ($confidence%)"
+                                        }
+                                    }
+                                    objectDetector.process(input)
+                                        .addOnSuccessListener { objects ->
+                                            val target = objects.maxByOrNull { obj ->
+                                                val area = obj.boundingBox.width().toLong() * obj.boundingBox.height().toLong()
+                                                area * (obj.labels.maxOfOrNull { it.confidence }?.toDouble() ?: 0.5)
+                                            }
+                                            if (target != null) {
+                                                val label = target.labels.firstOrNull()?.text ?: "Subject"
+                                                val confidence = target.labels.firstOrNull()?.confidence ?: 0f
+                                                executor.execute {
+                                                    liveObject = "Tracked subject: $label"
+                                                    liveConfidence = confidence
+                                                }
+                                            } else {
+                                                executor.execute {
+                                                    liveObject = "Searching for a clear subject…"
+                                                    liveConfidence = 0f
+                                                }
+                                            }
+                                        }
+                                        .addOnFailureListener {
+                                            executor.execute { liveObject = "Object tracking unavailable for this frame" }
+                                        }
+                                        .addOnCompleteListener { proxy.close() }
+                                }
+                                .addOnFailureListener {
+                                    executor.execute { liveScene = "Scene analysis unavailable for this frame" }
+                                    objectDetector.process(input)
+                                        .addOnCompleteListener { proxy.close() }
+                                }
+                        }
+                    }
+                }
                 provider.unbindAll()
                 boundCamera = provider.bindToLifecycle(
                     lifecycleOwner,
                     CameraSelector.Builder().requireLensFacing(lens).build(),
                     preview,
-                    capture
+                    capture,
+                    analysis
                 )
                 videoCapture = capture
                 status = "Live camera ready · HD"
@@ -663,6 +751,18 @@ private fun CameraScreen(onBack: () -> Unit, onSaved: (String) -> Unit) {
                             }
                             Surface(color = Color.Black.copy(alpha = .55f), shape = CircleShape) {
                                 Text("HD", Modifier.padding(horizontal = 12.dp, vertical = 7.dp), color = Color.White, fontSize = 10.sp)
+                            }
+                        }
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Surface(color = Color.Black.copy(alpha = .72f), shape = RoundedCornerShape(12.dp)) {
+                                Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+                                    Text("LIVE SCENE ANALYSIS", color = Cyan, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.sp)
+                                    Text(liveScene, color = Color.White, fontSize = 11.sp, maxLines = 2)
+                                    Text(liveObject, color = Violet, fontSize = 11.sp, maxLines = 1)
+                                    if (liveConfidence > 0f) {
+                                        Text("Subject confidence: ${(liveConfidence * 100).toInt()}%", color = Muted, fontSize = 9.sp)
+                                    }
+                                }
                             }
                         }
                         Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
