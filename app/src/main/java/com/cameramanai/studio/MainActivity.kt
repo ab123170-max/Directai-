@@ -4,6 +4,11 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.content.Context
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.speech.tts.TextToSpeech
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -578,6 +583,10 @@ private fun CameraScreen(onBack: () -> Unit, onSaved: (String) -> Unit) {
     var boxRight by remember { mutableFloatStateOf(0.82f) }
     var boxBottom by remember { mutableFloatStateOf(0.82f) }
     var hasTrackedBox by remember { mutableStateOf(false) }
+    var movement by remember { mutableStateOf("Push in") }
+    var steadiness by remember { mutableFloatStateOf(0f) }
+    var movementStatus by remember { mutableStateOf("Hold phone still to calibrate") }
+    val sensorManager = remember { context.getSystemService(Context.SENSOR_SERVICE) as SensorManager }
     var analyzerEnabled by remember { mutableStateOf(true) }
     val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
     val lastAnalysisAt = remember { longArrayOf(0L) }
@@ -589,6 +598,26 @@ private fun CameraScreen(onBack: () -> Unit, onSaved: (String) -> Unit) {
                 .enableClassification()
                 .build()
         )
+    }
+    DisposableEffect(sensorManager) {
+        val sensor = sensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION)
+            ?: sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+        val listener = object : SensorEventListener {
+            private var smooth = 0f
+            override fun onSensorChanged(event: SensorEvent) {
+                val raw = kotlin.math.sqrt(event.values.take(3).sumOf { it.toDouble() * it.toDouble() }).toFloat()
+                smooth = if (smooth == 0f) raw else smooth * 0.82f + raw * 0.18f
+                steadiness = smooth
+                movementStatus = when {
+                    smooth < 0.35f -> "STEADY · ready for a smooth take"
+                    smooth < 1.2f -> "MOVING · keep the motion gentle"
+                    else -> "SHAKY · pause and stabilize"
+                }
+            }
+            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
+        }
+        if (sensor != null) sensorManager.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_UI)
+        onDispose { sensorManager.unregisterListener(listener) }
     }
     DisposableEffect(Unit) {
         onDispose {
@@ -843,6 +872,44 @@ private fun CameraScreen(onBack: () -> Unit, onSaved: (String) -> Unit) {
                         permissionLauncher.launch(arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO))
                     }) { Text("Allow camera") }
                 }
+            }
+        }
+
+        Card(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+            colors = CardDefaults.cardColors(containerColor = Panel),
+            shape = RoundedCornerShape(18.dp)
+        ) {
+            Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Navigation, null, tint = Cyan, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(7.dp))
+                    Text("MODULE 5 · SMART MOVEMENT GUIDE", color = Cyan, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    listOf("Push in", "Pan left", "Pan right", "Tilt up", "Tilt down", "Hold steady").forEach { option ->
+                        FilterChip(selected = movement == option, onClick = { movement = option }, label = { Text(option, fontSize = 9.sp) })
+                    }
+                }
+                val arrow = when (movement) {
+                    "Push in" -> "↑  Move forward slowly"
+                    "Pan left" -> "←  Rotate left smoothly"
+                    "Pan right" -> "→  Rotate right smoothly"
+                    "Tilt up" -> "↗  Tilt upward gently"
+                    "Tilt down" -> "↘  Tilt downward gently"
+                    else -> "◎  Keep phone still"
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Surface(color = Color(0xFF12354A), shape = RoundedCornerShape(12.dp)) {
+                        Text(arrow, Modifier.padding(horizontal = 12.dp, vertical = 9.dp), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(movementStatus, color = if (steadiness < 0.35f) Cyan else if (steadiness < 1.2f) Color(0xFFFFD166) else Color(0xFFFF7B86), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text("Motion sensor: ${"%.2f".format(Locale.US, steadiness)} · smaller is steadier", color = Muted, fontSize = 9.sp)
+                    }
+                }
+                Text("Move slowly and keep a clear path. Sensor readings indicate shake, not whether the camera followed the selected direction.", color = Muted, fontSize = 9.sp, lineHeight = 13.sp)
             }
         }
 
