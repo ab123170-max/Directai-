@@ -3,6 +3,7 @@ name: Build Cameraman AI APK
 on:
   push:
     branches:
+      - main
       - upgrade/native-kotlin-android
   workflow_dispatch:
 
@@ -16,28 +17,21 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 21
-
       - name: Install web dependencies
-        run: npm install
-
+        run: npm install --no-audit --no-fund
       - name: Build web app
         run: npm run build
-
       - name: Install Capacitor
         run: npm install --no-save @capacitor/core@^7 @capacitor/cli@^7 @capacitor/android@^7
-
       - name: Configure Capacitor
         run: |
           cat > capacitor.config.json <<'EOF'
@@ -45,25 +39,18 @@ jobs:
             "appId": "com.cameramanai.studio",
             "appName": "Cameraman AI",
             "webDir": "dist",
-            "server": {
-              "androidScheme": "https"
-            },
-            "android": {
-              "allowMixedContent": false
-            }
+            "server": { "androidScheme": "https" },
+            "android": { "allowMixedContent": false }
           }
           EOF
           npx cap add android
-
       - name: Sync web app into Android
         run: npx cap sync android
-
       - name: Build debug APK
         run: |
           cd android
           chmod +x gradlew
           ./gradlew assembleDebug
-
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
