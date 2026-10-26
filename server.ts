@@ -24,12 +24,10 @@ async function startServer() {
   const app = express();
   app.use(express.json({ limit: '50mb' }));
 
-  // API Routes
-  app.get('/api/health', (req, res) => {
+  app.get('/api/health', (_req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
   });
 
-  // This endpoint makes a real Gemini request; it does not infer status from server uptime.
   app.get('/api/ai/health', async (_req, res) => {
     if (!apiKey || ['MY_GEMINI_API_KEY', 'dummy-key'].includes(apiKey)) {
       return res.status(503).json({ ok: false, provider: 'gemini', reason: 'GEMINI_API_KEY is missing or is a placeholder.' });
@@ -39,7 +37,6 @@ async function startServer() {
       const response = await ai.models.generateContent({
         model: 'gemini-3.8-flash',
         contents: 'Reply with exactly: GEMINI_OK',
-        config: { thinkingConfig: { thinkingLevel: 'low' } },
       });
       const text = (response.text || '').trim();
       if (!text) throw new Error('Gemini returned an empty response.');
@@ -50,11 +47,10 @@ async function startServer() {
     }
   });
 
-  // AI Scene Analysis endpoint
   app.post('/api/ai/analyze-scene', async (req, res) => {
     try {
       const { imageBase64, mode, currentShot } = req.body;
-      
+
       if (!apiKey || ['MY_GEMINI_API_KEY', 'dummy-key'].includes(apiKey)) {
         return res.status(503).json({ success: false, fallback: false, error: 'Gemini is not configured. Add GEMINI_API_KEY to the server environment.' });
       }
@@ -71,7 +67,7 @@ async function startServer() {
       }
 
       parts.push({
-        text: `You are an expert AI Camera Director for professional video production. 
+        text: `You are an expert AI Camera Director for professional video production.
         Analyze the current camera scene for shooting mode "${mode || 'general'}" (current shot: ${currentShot || 'Establishing Shot'}).
         Provide JSON response with:
         - subject: detected subject description
@@ -112,7 +108,6 @@ async function startServer() {
     }
   });
 
-  // AI Shot Planner generator endpoint
   app.post('/api/ai/generate-shotlist', async (req, res) => {
     try {
       const { title, category, description } = req.body;
@@ -165,11 +160,10 @@ async function startServer() {
     }
   });
 
-  // Vite middleware for frontend development
   const distPath = path.resolve(__dirname, 'dist');
   if (process.env.NODE_ENV === 'production' && fs.existsSync(distPath)) {
     app.use(express.static(distPath));
-    app.get('*', (req, res) => {
+    app.get('*', (_req, res) => {
       res.sendFile(path.resolve(distPath, 'index.html'));
     });
   } else {
@@ -236,68 +230,14 @@ function getFallbackRecommendations(mode: string) {
   };
 }
 
-function getFallbackShotList(category: string) {
+function getFallbackShotList(_category: string) {
   return [
-    {
-      shotNumber: 1,
-      name: 'Establishing Wide Shot',
-      type: 'Establishing shot',
-      purpose: 'Set the scene, location, and atmosphere.',
-      angle: 'Eye-Level',
-      movement: 'static',
-      duration: 6,
-      subject: 'Full environment overview',
-    },
-    {
-      shotNumber: 2,
-      name: 'Subject Medium Shot',
-      type: 'Medium shot',
-      purpose: 'Introduce the main subject or action.',
-      angle: 'Eye-Level',
-      movement: 'push-in',
-      duration: 5,
-      subject: 'Main subject upper body',
-    },
-    {
-      shotNumber: 3,
-      name: 'Texture Detail Close-up',
-      type: 'Close-up',
-      purpose: 'Highlight critical details, quality, and texture.',
-      angle: 'Low-Angle',
-      movement: 'static',
-      duration: 4,
-      subject: 'Key feature / ingredient / texture',
-    },
-    {
-      shotNumber: 4,
-      name: 'Action B-Roll Sequence',
-      type: 'B-roll',
-      purpose: 'Capture dynamic motion and process.',
-      angle: 'Eye-Level',
-      movement: 'track',
-      duration: 5,
-      subject: 'Active handling in progress',
-    },
-    {
-      shotNumber: 5,
-      name: 'Hero Climax Shot',
-      type: 'Hero shot',
-      purpose: 'Deliver the most striking visual frame of the sequence.',
-      angle: 'Low-Angle',
-      movement: 'orbit',
-      duration: 6,
-      subject: 'Completed masterpiece / product',
-    },
-    {
-      shotNumber: 6,
-      name: 'Cinematic Closing Shot',
-      type: 'Ending shot',
-      purpose: 'Provide a satisfying conclusion to the video sequence.',
-      angle: 'Eye-Level',
-      movement: 'pull-back',
-      duration: 5,
-      subject: 'Wider concluding view',
-    }
+    { shotNumber: 1, name: 'Establishing Wide Shot', type: 'Establishing shot', purpose: 'Set the scene, location, and atmosphere.', angle: 'Eye-Level', movement: 'static', duration: 6, subject: 'Full environment overview' },
+    { shotNumber: 2, name: 'Subject Medium Shot', type: 'Medium shot', purpose: 'Introduce the main subject or action.', angle: 'Eye-Level', movement: 'push-in', duration: 5, subject: 'Main subject upper body' },
+    { shotNumber: 3, name: 'Texture Detail Close-up', type: 'Close-up', purpose: 'Highlight critical details, quality, and texture.', angle: 'Low-Angle', movement: 'static', duration: 4, subject: 'Key feature / ingredient / texture' },
+    { shotNumber: 4, name: 'Action B-Roll Sequence', type: 'B-roll', purpose: 'Capture dynamic motion and process.', angle: 'Eye-Level', movement: 'track', duration: 5, subject: 'Active handling in progress' },
+    { shotNumber: 5, name: 'Hero Climax Shot', type: 'Hero shot', purpose: 'Deliver the most striking visual frame of the sequence.', angle: 'Low-Angle', movement: 'orbit', duration: 6, subject: 'Completed masterpiece / product' },
+    { shotNumber: 6, name: 'Cinematic Closing Shot', type: 'Ending shot', purpose: 'Provide a satisfying conclusion to the video sequence.', angle: 'Eye-Level', movement: 'pull-back', duration: 5, subject: 'Wider concluding view' }
   ];
 }
 
