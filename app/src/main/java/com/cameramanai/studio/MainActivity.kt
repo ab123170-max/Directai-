@@ -71,6 +71,32 @@ import com.google.mlkit.vision.label.defaults.ImageLabelerOptions
 import com.google.mlkit.vision.objects.ObjectDetection
 import com.google.mlkit.vision.objects.defaults.ObjectDetectorOptions
 
+private fun interpretSceneLabels(labels: List<String>): Pair<String, String> {
+    val words = labels.joinToString(" ").lowercase(Locale.US)
+    return when {
+        listOf("sunset", "sunrise", "sky", "cloud", "dusk", "dawn").any { it in words } ->
+            "SKY / GOLDEN-HOUR SCENE" to "Expose for the bright sky, keep the horizon level, and try a wide establishing shot or a silhouette."
+        listOf("beach", "ocean", "sea", "waterfall", "lake", "river", "water").any { it in words } ->
+            "WATER / COASTAL SCENE" to "Keep the horizon straight, protect bright reflections, and capture a wide shot plus a close detail of moving water."
+        listOf("mountain", "forest", "tree", "plant", "flower", "grass", "landscape", "nature").any { it in words } ->
+            "NATURE / LANDSCAPE" to "Start with a wide establishing frame, include foreground depth, then capture a slow pan only if your footing is safe."
+        listOf("person", "people", "face", "human", "portrait", "clothing").any { it in words } ->
+            "PEOPLE / PORTRAIT" to "Keep the face well lit, leave space in the direction of the gaze, and capture a medium shot followed by a close-up."
+        listOf("food", "dish", "meal", "fruit", "vegetable", "cuisine").any { it in words } ->
+            "FOOD / PRODUCT DETAIL" to "Use soft side light, simplify the background, and capture one overhead frame plus one close texture detail."
+        listOf("building", "architecture", "house", "tower", "bridge", "city", "skyscraper").any { it in words } ->
+            "ARCHITECTURE / CITY" to "Keep vertical lines straight, avoid cutting off key edges, and capture a balanced wide frame before detail shots."
+        listOf("car", "vehicle", "bicycle", "motorcycle", "train", "airplane").any { it in words } ->
+            "VEHICLE / MOTION" to "Show the direction of travel with extra space ahead, keep a safe distance, and try a steady wide shot before close details."
+        listOf("dog", "cat", "bird", "animal", "horse", "pet").any { it in words } ->
+            "ANIMAL / PET" to "Move slowly, focus on the eyes when possible, and leave room for the animal to move naturally."
+        listOf("room", "furniture", "sofa", "table", "indoor", "kitchen").any { it in words } ->
+            "INDOOR / INTERIOR" to "Use available window light, avoid a cluttered background, and show the room with a stable wide shot first."
+        labels.isEmpty() -> "SCENE NOT CLEAR YET" to "Pause briefly, point at the main subject, and wait for the visual labels to update."
+        else -> "GENERAL SCENE" to "Begin with a steady wide shot, keep the main subject clearly framed, and record a short detail shot for variety."
+    }
+}
+
 private val Ink = Color(0xFF0B0B12)
 private val Panel = Color(0xFF171722)
 private val Violet = Color(0xFF9B7BFF)
@@ -628,6 +654,9 @@ private fun CameraScreen(activeShot: Shot?, onShotCaptured: (Int) -> Unit, onBac
     var lens by remember { mutableIntStateOf(CameraSelector.LENS_FACING_BACK) }
     var previewView by remember { mutableStateOf<PreviewView?>(null) }
     var liveScene by remember { mutableStateOf("Waiting for camera frames…") }
+    var liveSceneType by remember { mutableStateOf("Analyzing scene…") }
+    var liveSceneAdvice by remember { mutableStateOf("Hold the phone steady while the scene is analyzed.") }
+    var liveSceneLabels by remember { mutableStateOf("No labels yet") }
     var liveObject by remember { mutableStateOf("No subject detected yet") }
     var liveConfidence by remember { mutableStateOf(0f) }
     var boxLeft by remember { mutableFloatStateOf(0.18f) }
@@ -723,12 +752,18 @@ private fun CameraScreen(activeShot: Shot?, onShotCaptured: (Int) -> Unit, onBac
                             val input = InputImage.fromMediaImage(mediaImage, proxy.imageInfo.rotationDegrees)
                             imageLabeler.process(input)
                                 .addOnSuccessListener { labels ->
-                                    val best = labels.maxByOrNull { it.confidence }
-                                    if (best != null && best.confidence >= 0.45f) {
-                                        val name = best.text
-                                        val confidence = (best.confidence * 100).toInt()
-                                        executor.execute {
-                                            liveScene = "Scene cue: $name ($confidence%)"
+                                    val rankedLabels = labels.sortedByDescending { it.confidence }.take(5)
+                                    val best = rankedLabels.firstOrNull()
+                                    val labelNames = rankedLabels.map { it.text }
+                                    val interpretation = interpretSceneLabels(labelNames)
+                                    executor.execute {
+                                        liveSceneType = interpretation.first
+                                        liveSceneAdvice = interpretation.second
+                                        liveSceneLabels = if (labelNames.isEmpty()) "No confident visual labels" else labelNames.joinToString(" · ")
+                                        liveScene = if (best != null && best.confidence >= 0.35f) {
+                                            "Visual cues: ${(best.confidence * 100).toInt()}% strongest label"
+                                        } else {
+                                            "Scene labels are uncertain · keep framing simple"
                                         }
                                     }
                                     objectDetector.process(input)
@@ -922,7 +957,10 @@ private fun CameraScreen(activeShot: Shot?, onShotCaptured: (Int) -> Unit, onBac
                             Surface(color = Color.Black.copy(alpha = .72f), shape = RoundedCornerShape(12.dp)) {
                                 Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
                                     Text("LIVE SCENE ANALYSIS", color = Cyan, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.sp)
-                                    Text(liveScene, color = Color.White, fontSize = 11.sp, maxLines = 2)
+                                    Text(liveSceneType, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                                    Text(liveScene, color = Muted, fontSize = 9.sp, maxLines = 2)
+                                    Text("DIRECTOR TIP · $liveSceneAdvice", color = Cyan, fontSize = 10.sp, maxLines = 3, lineHeight = 14.sp)
+                                    Text("Cues: $liveSceneLabels", color = Muted, fontSize = 9.sp, maxLines = 2)
                                     Text(liveObject, color = Violet, fontSize = 11.sp, maxLines = 1)
                                     Text(if (hasTrackedBox) "TRACKING BOX ACTIVE · keep subject in frame" else "TRACKING · searching for subject", color = if (hasTrackedBox) Cyan else Muted, fontSize = 9.sp, maxLines = 1)
                                     if (liveConfidence > 0f) {
