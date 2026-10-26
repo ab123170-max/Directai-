@@ -174,6 +174,8 @@ private fun CameramanApp() {
                             onOpenPlan = { tab = StudioTab.Plan }
                         )
                         StudioTab.Camera -> CameraScreen(
+                            activeShot = shots.firstOrNull { it.id !in completed },
+                            onShotCaptured = { id -> completed = completed + id },
                             onBack = { tab = StudioTab.Plan },
                             onSaved = { path -> notice = "Saved video: ${File(path).name}" }
                         )
@@ -594,7 +596,7 @@ private fun FlowChips(options: List<String>, selected: String, onSelect: (String
 }
 
 @Composable
-private fun CameraScreen(onBack: () -> Unit, onSaved: (String) -> Unit) {
+private fun CameraScreen(activeShot: Shot?, onShotCaptured: (Int) -> Unit, onBack: () -> Unit, onSaved: (String) -> Unit) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val executor = remember { ContextCompat.getMainExecutor(context) }
@@ -624,6 +626,11 @@ private fun CameraScreen(onBack: () -> Unit, onSaved: (String) -> Unit) {
     var movement by remember { mutableStateOf("Push in") }
     var steadiness by remember { mutableFloatStateOf(0f) }
     var movementStatus by remember { mutableStateOf("Hold phone still to calibrate") }
+    var checkedFocus by remember { mutableStateOf(false) }
+    var checkedExposure by remember { mutableStateOf(false) }
+    var checkedBackground by remember { mutableStateOf(false) }
+    var checkedStability by remember { mutableStateOf(false) }
+    val preflightReady = checkedFocus && checkedExposure && checkedBackground && checkedStability
     val sensorManager = remember { context.getSystemService(Context.SENSOR_SERVICE) as SensorManager }
     var analyzerEnabled by remember { mutableStateOf(true) }
     val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
@@ -1059,6 +1066,11 @@ private fun CameraScreen(onBack: () -> Unit, onSaved: (String) -> Unit) {
                                             activeRecording = null
                                             if (!event.hasError() && file.exists() && file.length() > 0L) {
                                                 status = "Clip saved · ${file.name}"
+                                                activeShot?.let { onShotCaptured(it.id) }
+                                                checkedFocus = false
+                                                checkedExposure = false
+                                                checkedBackground = false
+                                                checkedStability = false
                                                 onSaved(file.absolutePath)
                                             } else {
                                                 status = "Recording failed (code ${event.error}). Please try again."
