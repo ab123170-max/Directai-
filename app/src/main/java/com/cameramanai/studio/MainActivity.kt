@@ -643,6 +643,8 @@ private fun CameraScreen(activeShot: Shot?, onShotCaptured: (Int) -> Unit, onBac
     var checkedExposure by remember { mutableStateOf(false) }
     var checkedBackground by remember { mutableStateOf(false) }
     var checkedStability by remember { mutableStateOf(false) }
+    var selectedPose by remember { mutableStateOf("Confident hero") }
+    var selectedExpression by remember { mutableStateOf("Natural confidence") }
     val preflightReady = checkedFocus && checkedExposure && checkedBackground && checkedStability
     val sensorManager = remember { context.getSystemService(Context.SENSOR_SERVICE) as SensorManager }
     var analyzerEnabled by remember { mutableStateOf(true) }
@@ -994,6 +996,58 @@ private fun CameraScreen(activeShot: Shot?, onShotCaptured: (Int) -> Unit, onBac
                     Spacer(Modifier.width(8.dp))
                     Text("Saved clip marks this shot done", color = Muted, fontSize = 9.sp)
                 }
+            }
+        }
+
+        Card(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF211B35)),
+            shape = RoundedCornerShape(18.dp)
+        ) {
+            Column(Modifier.padding(horizontal = 12.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.AccessibilityNew, null, tint = Violet, modifier = Modifier.size(19.dp))
+                    Spacer(Modifier.width(7.dp))
+                    Text("MODULE 10 · POSE & EXPRESSION COACH", color = Violet, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
+                }
+                Text("Choose the feeling before you record", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Text("POSE", color = Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                FlowChips(
+                    options = listOf("Confident hero", "Relaxed natural", "Walking candid", "Power stance", "Look-back portrait", "Seated cinematic"),
+                    selected = selectedPose,
+                    onSelect = { selectedPose = it }
+                )
+                Text("EXPRESSION", color = Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                FlowChips(
+                    options = listOf("Natural confidence", "Warm smile", "Serious intensity", "Dreamy / thoughtful", "Playful energy", "Calm neutral"),
+                    selected = selectedExpression,
+                    onSelect = { selectedExpression = it }
+                )
+                val poseCue = when (selectedPose) {
+                    "Relaxed natural" -> "Relax your shoulders, shift weight onto one leg, keep hands loose, and breathe normally."
+                    "Walking candid" -> "Walk slowly past the camera, look slightly beyond the lens, and repeat the walk for a clean take."
+                    "Power stance" -> "Plant feet comfortably, lengthen your posture, keep shoulders relaxed, and angle your body slightly."
+                    "Look-back portrait" -> "Turn your body away first, then look back toward the lens; keep the neck relaxed."
+                    "Seated cinematic" -> "Sit tall near the edge of the seat, angle knees slightly sideways, and keep hands intentional."
+                    else -> "Stand at a slight angle to the camera, lengthen your posture, relax your shoulders, and keep your chin natural."
+                }
+                val expressionCue = when (selectedExpression) {
+                    "Warm smile" -> "Think of someone you genuinely like; let the smile reach your eyes instead of forcing it."
+                    "Serious intensity" -> "Relax your jaw, focus just beside the lens, and hold a steady gaze without frowning hard."
+                    "Dreamy / thoughtful" -> "Look toward a distant point, soften your eyes, and pause as if remembering something."
+                    "Playful energy" -> "Use a small natural reaction, shift your gaze once, and keep the movement light."
+                    "Calm neutral" -> "Unclench your jaw, breathe out slowly, and keep your face relaxed."
+                    else -> "Keep your eyes engaged, breathe naturally, and avoid holding tension in your forehead or jaw."
+                }
+                Surface(color = Color.Black.copy(alpha = .22f), shape = RoundedCornerShape(12.dp)) {
+                    Column(Modifier.padding(11.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("YOUR POSE CUE", color = Cyan, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        Text(poseCue, color = Color.White, fontSize = 11.sp, lineHeight = 16.sp)
+                        Text("YOUR EXPRESSION CUE", color = Cyan, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        Text(expressionCue, color = Color.White, fontSize = 11.sp, lineHeight = 16.sp)
+                    }
+                }
+                Text("Tip: record a 3–5 second test, review it, then retake if the pose feels stiff. This module gives guided prompts; it does not yet automatically score body pose or facial expression.", color = Muted, fontSize = 10.sp, lineHeight = 14.sp)
             }
         }
 
