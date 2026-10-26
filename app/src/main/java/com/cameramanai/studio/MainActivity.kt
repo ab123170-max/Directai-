@@ -372,6 +372,14 @@ private fun DirectorScreen(
     onOpenPlan: () -> Unit
 ) {
     val context = LocalContext.current
+    val ttsRef = remember { arrayOfNulls<TextToSpeech>(1) }
+    DisposableEffect(Unit) {
+        onDispose {
+            ttsRef[0]?.stop()
+            ttsRef[0]?.shutdown()
+            ttsRef[0] = null
+        }
+    }
     var scene by remember { mutableStateOf("Beautiful scenery") }
     var subject by remember { mutableStateOf("Landscape") }
     var mood by remember { mutableStateOf("Cinematic") }
@@ -420,10 +428,12 @@ private fun DirectorScreen(
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(onClick = {
                             try {
-                                val engine = TextToSpeech(context) { result ->
+                                ttsRef[0]?.stop()
+                                ttsRef[0]?.shutdown()
+                                ttsRef[0] = TextToSpeech(context) { result ->
                                     if (result == TextToSpeech.SUCCESS) {
-                                        engine.language = Locale.US
-                                        engine.speak(cue.voiceLine, TextToSpeech.QUEUE_FLUSH, null, "director-cue")
+                                        ttsRef[0]?.language = Locale.US
+                                        ttsRef[0]?.speak(cue.voiceLine, TextToSpeech.QUEUE_FLUSH, null, "director-cue")
                                         voiceStatus = "Speaking direction"
                                     } else voiceStatus = "Text-to-speech is unavailable"
                                 }
