@@ -792,6 +792,8 @@ private fun CameraScreen(activeShot: Shot?, onShotCaptured: (Int) -> Unit, onBac
     }
     var recording by remember { mutableStateOf(false) }
     var showGrid by remember { mutableStateOf(true) }
+    var showChecklist by remember { mutableStateOf(false) }
+    var showPose by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("Ready to shoot") }
     var videoCapture by remember { mutableStateOf<VideoCapture<Recorder>?>(null) }
     var activeRecording by remember { mutableStateOf<androidx.camera.video.Recording?>(null) }
@@ -1145,6 +1147,7 @@ private fun CameraScreen(activeShot: Shot?, onShotCaptured: (Int) -> Unit, onBac
             }
         }
 
+        if (showChecklist) {
         Card(
             modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
             colors = CardDefaults.cardColors(containerColor = Color(0xFF202034)),
@@ -1182,6 +1185,20 @@ private fun CameraScreen(activeShot: Shot?, onShotCaptured: (Int) -> Unit, onBac
             }
         }
 
+        } else {
+            Surface(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp).clickable { showChecklist = true }, color = Color(0xFF202034), shape = RoundedCornerShape(14.dp)) {
+                Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Checklist, null, tint = Cyan, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("SMART CAPTURE CHECKLIST", color = Cyan, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
+                        Text("${listOf(checkedFocus, checkedExposure, checkedBackground, checkedStability).count { it }}/4 checks · tap to expand", color = Color.White, fontSize = 11.sp)
+                    }
+                    Icon(Icons.Default.ExpandMore, null, tint = Cyan)
+                }
+            }
+        }
+        if (showPose) {
         Card(
             modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
             colors = CardDefaults.cardColors(containerColor = Color(0xFF211B35)),
@@ -1231,6 +1248,19 @@ private fun CameraScreen(activeShot: Shot?, onShotCaptured: (Int) -> Unit, onBac
                     }
                 }
                 Text("Tip: record a 3–5 second test, review it, then retake if the pose feels stiff. This module gives guided prompts; it does not yet automatically score body pose or facial expression.", color = Muted, fontSize = 10.sp, lineHeight = 14.sp)
+            }
+        }
+        } else {
+            Surface(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp).clickable { showPose = true }, color = Color(0xFF211B35), shape = RoundedCornerShape(14.dp)) {
+                Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.AccessibilityNew, null, tint = Violet, modifier = Modifier.size(19.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("POSE & EXPRESSION COACH", color = Violet, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
+                        Text("Tap to choose pose and expression", color = Color.White, fontSize = 11.sp)
+                    }
+                    Icon(Icons.Default.ExpandMore, null, tint = Violet)
+                }
             }
         }
 
