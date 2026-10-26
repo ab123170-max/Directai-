@@ -1,5 +1,6 @@
 export type AppScreen = 
   | 'splash'
+  | 'feed'
   | 'home'
   | 'songStudio'
   | 'shotDirector'
@@ -44,8 +45,8 @@ export type CameraMovement =
 
 export interface BeatMarker {
   id: string;
-  timestamp: number; // seconds
-  intensity: number; // 0.0 to 1.0
+  timestamp: number;
+  intensity: number;
   isBeatDrop: boolean;
 }
 
@@ -53,7 +54,7 @@ export interface SongTrack {
   id: string;
   title: string;
   artist: string;
-  duration: number; // seconds
+  duration: number;
   bpm: number;
   audioUrl?: string;
   waveformData: number[];
