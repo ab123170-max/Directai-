@@ -3,7 +3,10 @@ package com.cameramanai.studio
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
+import android.net.Uri
+import android.media.MediaMetadataRetriever
 import android.os.Bundle
+import android.os.SystemClock
 import android.content.Context
 import android.hardware.Sensor
 import android.hardware.SensorEvent
@@ -478,6 +481,33 @@ private fun DirectorScreen(
     var mood by remember { mutableStateOf("Cinematic") }
     var directionIndex by remember { mutableIntStateOf(0) }
     var voiceStatus by remember { mutableStateOf("Choose a scene to get started") }
+    var selectedMusicUri by remember { mutableStateOf<Uri?>(null) }
+    var selectedMusicName by remember { mutableStateOf("No song selected") }
+    var musicDurationMs by remember { mutableLongStateOf(0L) }
+    var tapTimes by remember { mutableStateOf(listOf<Long>()) }
+    var detectedBpm by remember { mutableIntStateOf(0) }
+    var beatStatus by remember { mutableStateOf("Select a song, then tap along with its beat 8 times.") }
+    val musicPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            selectedMusicUri = uri
+            try {
+                val retriever = MediaMetadataRetriever()
+                retriever.setDataSource(context, uri)
+                selectedMusicName = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE)
+                    ?: uri.lastPathSegment?.substringAfterLast('/')
+                    ?: "Selected audio"
+                musicDurationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+                retriever.release()
+                beatStatus = if (musicDurationMs > 0) "Song loaded · duration ${formatDuration(musicDurationMs)} · tap along with the beat" else "Song selected · tap along with the beat"
+            } catch (_: Exception) {
+                selectedMusicName = uri.lastPathSegment ?: "Selected audio"
+                musicDurationMs = 0L
+                beatStatus = "Song selected, but its metadata could not be read"
+            }
+            tapTimes = emptyList()
+            detectedBpm = 0
+        }
+    }
     val cues = remember(scene, subject, mood) { makeDirectorCues(scene, subject, mood) }
     val cue = cues[directionIndex.coerceIn(0, cues.lastIndex)]
 
@@ -543,6 +573,71 @@ private fun DirectorScreen(
             }
         }
         item {
+            Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF142A31)), shape = RoundedCornerShape(22.dp)) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.MusicNote, null, tint = Cyan, modifier = Modifier.size(21.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("MODULE 12 · MUSIC & BEAT ANALYZER", color = Cyan, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
+                    }
+                    Text("Sync your shots to the song", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                    Text(selectedMusicName, color = Violet, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 2)
+                    if (musicDurationMs > 0L) Text("Track length: ${formatDuration(musicDurationMs)}", color = Muted, fontSize = 10.sp)
+                    Button(onClick = { musicPicker.launch(arrayOf("audio/*")) }, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Default.LibraryMusic, null); Spacer(Modifier.width(7.dp)); Text("Choose song from phone")
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Column(Modifier.weight(1f)) {
+                            Text(if (detectedBpm > 0) "$detectedBpm BPM" else "Tap tempo", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
+                            Text(if (detectedBpm > 0) "Approx. ${60000 / detectedBpm} ms per beat" else "${tapTimes.size}/8 beat taps", color = Muted, fontSize = 10.sp)
+                        }
+                        Button(
+                            onClick = {
+                                val now = SystemClock.elapsedRealtime()
+                                val recent = (tapTimes + now).takeLast(8)
+                                tapTimes = recent
+                                if (recent.size >= 4) {
+                                    val intervals = recent.zipWithNext { a, b -> b - a }.filter { it in 250L..2000L }
+                                    if (intervals.size >= 3) {
+                                        val sorted = intervals.sorted()
+                                        val median = sorted[sorted.size / 2]
+                                        detectedBpm = (60000.0 / median).toInt().coerceIn(30, 240)
+                                        beatStatus = "Estimated from your taps · tap Reset if you lose the beat"
+                                    } else {
+                                        detectedBpm = 0
+                                        beatStatus = "Tap steadily with each beat; ignored unusually short or long gaps"
+                                    }
+                                } else {
+                                    beatStatus = "Keep tapping once per beat (${recent.size}/8)"
+                                }
+                            },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = Violet, contentColor = Ink)
+                        ) {
+                            Icon(Icons.Default.TouchApp, null); Spacer(Modifier.width(5.dp)); Text("Tap the beat")
+                        }
+                    }
+                    if (detectedBpm > 0) {
+                        val beatMs = 60000L / detectedBpm
+                        val barMs = beatMs * 4L
+                        Surface(color = Color.Black.copy(alpha = .22f), shape = RoundedCornerShape(12.dp)) {
+                            Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                                Text("SHOT TIMING SUGGESTIONS", color = Cyan, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                Text("Quick cuts: ${formatDuration(beatMs)} per beat", color = Color.White, fontSize = 11.sp)
+                                Text("Smooth cinematic cuts: ${formatDuration(barMs)} every 4 beats", color = Color.White, fontSize = 11.sp)
+                                Text("Suggested edit rhythm: ${if (mood == "Energetic") "1 beat per cut" else "2–4 beats per cut"} for $mood mood", color = Muted, fontSize = 10.sp)
+                            }
+                        }
+                    }
+                    Text(beatStatus, color = Muted, fontSize = 10.sp, lineHeight = 15.sp)
+                    OutlinedButton(onClick = { tapTimes = emptyList(); detectedBpm = 0; beatStatus = "Tap along with the song 8 times to estimate tempo" }, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Default.Refresh, null); Spacer(Modifier.width(6.dp)); Text("Reset tempo")
+                    }
+                    Text("This version reads basic audio metadata and estimates BPM from manual beat taps. It does not yet automatically detect beats from the song or add the track to the video timeline.", color = Muted, fontSize = 10.sp, lineHeight = 15.sp)
+                }
+            }
+        }
+        item {
             Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(20.dp)) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("Before you press record", color = Color.White, fontWeight = FontWeight.Bold)
@@ -568,6 +663,13 @@ private fun DirectorScreen(
         }
         item { Text("This first version uses scene-based coaching rules on the phone. Live scene recognition and Gemini-powered custom direction are not connected yet.", color = Muted, fontSize = 10.sp, lineHeight = 16.sp) }
     }
+}
+
+private fun formatDuration(milliseconds: Long): String {
+    val totalSeconds = (milliseconds / 1000L).coerceAtLeast(0L)
+    val minutes = totalSeconds / 60L
+    val seconds = totalSeconds % 60L
+    return "%d:%02d".format(Locale.US, minutes, seconds)
 }
 
 private data class DirectorCue(
